@@ -1,0 +1,26 @@
+[project]
+name = "dsetkit"
+version = "0.1.0"
+description = "Deep learning dataset infrastructure toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+authors = [
+    {name = "Jasper Tao"}
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "natsort>=8.0",
+]
+
+[project.optional-dependencies]
+visualize = ["opencv-python>=4.8"]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
