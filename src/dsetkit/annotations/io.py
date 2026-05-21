@@ -15,39 +15,46 @@ FORMAT_DIRS = {
     "yolo": "labels",
 }
 
-def get_output_suffix(fmt: str) -> str:
+def get_label_dir_name(fmt: str) -> str:
+    name = FORMAT_DIRS.get(fmt)
+    if name is None:
+        raise ValueError(f"Unknown format: {fmt}")
+    return name
+
+
+def get_label_file_suffix(fmt: str) -> str:
     suffix = FORMAT_SUFFIXES.get(fmt)
     if suffix is None:
         raise ValueError(f"Unknown format: {fmt}")
     return suffix
 
 
-def get_output_path(image_path: str, out_dir: str, fmt: str) -> str:
-    suffix = get_output_suffix(fmt)
+def get_label_path(image_path: str, label_dir: str, fmt: str) -> str:
+    suffix = get_label_file_suffix(fmt)
+    
     label_file = f"{Path(image_path).stem}{suffix}"
-    out_path = Path(out_dir) / label_file
-    return str(out_path)
+    
+    label_path = Path(label_dir) / label_file
+    return str(label_path)
 
 
-def default_out_dir(image_path: str, fmt: str) -> str:
-    name = FORMAT_DIRS.get(fmt)
-    if name is None:
-        raise ValueError(f"Unknown format: {fmt}")
-
-    out_dir = Path(image_path).parent.parent / name
-    ensure_dir(out_dir)
-    return str(out_dir)
+def default_label_dir(image_path: str, fmt: str) -> str:
+    name = get_label_dir_name(fmt)
+    label_dir = Path(image_path).parent.parent / name
+    ensure_dir(label_dir)
+    return str(label_dir)
 
 
-def auto_out_path(image_path: str, fmt: str, out_dir: str | None = None) -> str:
-    if out_dir is None:
-        out_dir = default_out_dir(image_path, fmt)
+def auto_label_path(image_path: str, fmt: str, label_dir: str | None = None) -> str:
+    if label_dir is None:
+        label_dir = default_label_dir(image_path, fmt)
     else:
-        out_dir = Path(out_dir)
-        ensure_dir(out_dir)
+        name = get_label_dir_name(fmt)
+        label_dir = Path(label_dir) / name
+        ensure_dir(label_dir)
 
-    out_path = get_output_path(image_path, out_dir, fmt)
-    return out_path
+    label_path = get_label_path(image_path, label_dir, fmt)
+    return label_path
 
 
 def ensure_dir(path: str | Path) -> None:
@@ -133,7 +140,7 @@ def convert(
         **kwargs,
     )
 
-    out_path = auto_out_path(image_path, target_format, out_dir)
+    out_path = auto_label_path(image_path, target_format, out_dir)
 
     dump(ann, out_path, fmt=target_format)
 

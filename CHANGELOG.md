@@ -52,4 +52,23 @@ and this project adheres to Semantic Versioning.
 
 ---
 
-## [0.1.1] - 202**-**-**
+## [0.1.1] - 2026-05-21
+
+### Changed
+
+- Renamed annotation IO helpers in `dsetkit.annotations.io` for clearer semantics:
+  - `get_output_suffix(...)` → `get_label_file_suffix(...)`
+  - `get_output_path(...)` → `get_label_path(...)`
+  - `default_out_dir(...)` → `default_label_dir(...)`
+  - `auto_out_path(...)` → `auto_label_path(...)`
+- Introduced `get_label_dir_name(fmt)` helper to centralize format-to-directory-name lookup.
+- `auto_label_path(...)` now appends the format-specific subdirectory (e.g. `labels/`, `annotations/`) under the user-provided `label_dir`, making behavior consistent with `default_label_dir(...)`.
+
+### Fixed
+
+- `dump_voc(...)` now coerces `ann.image_path` to `str` before writing it to the `<filename>` XML element, preventing failures when `image_path` is a `pathlib.Path`.
+
+### Breaking
+
+- The renamed functions in `dsetkit.annotations.io` are not aliased to their old names. Callers using `get_output_suffix`, `get_output_path`, `default_out_dir`, or `auto_out_path` must migrate to the new names.
+- `auto_label_path(image_path, fmt, label_dir=...)` no longer treats `label_dir` as the final output directory; the format subdirectory is appended automatically. Pass the dataset root (the parent of the labels folder) instead of the labels folder itself.

@@ -89,7 +89,7 @@ def dump_voc(
     ET.SubElement(
         root,
         "filename",
-    ).text = ann.image_path
+    ).text = str(ann.image_path)
 
     size = ET.SubElement(root, "size")
 
