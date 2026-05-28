@@ -23,10 +23,10 @@ Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 ## 特性
 
 | 模块 | 能力 |
-|------|------|
-| **标注 I/O** | 在统一 `Annotation` schema 下读写 **COCO / LabelMe / VOC / YOLO** |
+| ------ | ------ |
+| **标注 I/O** | 在统一 `Annotation` schema 下读写 **LabelMe / VOC / YOLO** |
 | **格式转换** | 单文件 `convert`、大规模 `batch_convert`（支持多进程） |
-| **数据集** | 按文件名 stem 自动配对图像与标签，多格式共存时按优先级选取 |
+| **数据集** | 按文件名 stem 自动配对图像与标签，并基于 `source_format` 过滤标签后缀 |
 | **评估** | 基于 IoU 的 TP/FP 匹配、mAP@0.5、Precision / Recall / F1（类级与整体） |
 | **图像工具** | 无需完整解码即可读取 JPEG/PNG/WebP/BMP 尺寸；自然排序遍历 |
 | **可视化** | `Plotter` 在图像上绘制检测框（可选依赖 OpenCV） |
@@ -47,7 +47,7 @@ pip install -e .
 pip install -e ".[visualize]"
 ```
 
-要求 **Python ≥ 3.11**。核心依赖：`numpy`、`natsort`。
+要求 **Python ≥ 3.11**。核心依赖：`numpy`、`natsort`、`tqdm`。
 
 ---
 
@@ -97,8 +97,9 @@ dataset = Dataset(
     image_dir="images/train",
     label_dir="labels/labelme",
     names=["cat", "dog"],
-    input_format="labelme",
+    source_format="labelme",
 )
+dataset.build()
 
 # 仅转换有标签的样本
 pairs = [s for s in dataset if s.label_path is not None]
@@ -116,7 +117,7 @@ paths = batch_convert(
 
 ### 3. 构建数据集索引
 
-`Dataset` 扫描图像目录，按 stem 在标签目录中查找对应标注文件。若同一 stem 存在多种后缀（如 `.txt` 与 `.json`），按优先级选择：**yolo > coco/labelme > voc**。
+`Dataset` 扫描图像目录，按 stem 在标签目录中查找对应标注文件，并按 `source_format` 对应后缀进行匹配（`labelme -> .json`, `voc -> .xml`, `yolo -> .txt`）。
 
 ```python
 from dsetkit import Dataset
@@ -125,8 +126,9 @@ dataset = Dataset(
     image_dir="images/val",
     label_dir="labels",
     names=["person", "car"],
-    input_format="voc",
+    source_format="voc",
 )
+dataset.build()
 
 print(len(dataset))
 for sample in dataset:
@@ -151,8 +153,9 @@ dataset = Dataset(
     image_dir="images/val",
     label_dir="labels/yolo",
     names=["person"],
-    input_format="yolo",
+    source_format="yolo",
 )
+dataset.build()
 
 metrics = MyEvaluator(dataset).evaluate(
     conf_threshold=0.5,
@@ -187,8 +190,7 @@ plotter.save("vis.jpg")
 ## 支持的标注格式
 
 | 格式 | 标识符 | 文件后缀 | 说明 |
-|------|--------|----------|------|
-| COCO | `coco` | `.json` | 实例分割/检测 JSON |
+| ------ | -------- | ---------- | ------ |
 | LabelMe | `labelme` | `.json` | 常见交互式标注导出 |
 | Pascal VOC | `voc` | `.xml` | XML 检测标注 |
 | YOLO | `yolo` | `.txt` | 归一化 `class cx cy w h` |
@@ -201,8 +203,9 @@ plotter.save("vis.jpg")
 
 ```text
 Annotation
-├── image_path, width, height
+├── width, height
 ├── names: list[str]
+├── extra: dict[str, Any]
 └── items: list[AnnotationItem]
     ├── category, category_id
     ├── bbox: BBox(x1, y1, x2, y2)   # 绝对像素，左上-右下
@@ -218,6 +221,7 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema、io、convert、各格式适配器
 │   ├── dataset.py         # Dataset / DatasetSample
+│   ├── tools.py           # 批量转换/可视化便捷入口
 │   ├── evaluator.py       # 检测评估基类
 │   ├── metrics.py         # IoU、AP、P/R/F1
 │   ├── utils/             # 图像元信息、文件索引

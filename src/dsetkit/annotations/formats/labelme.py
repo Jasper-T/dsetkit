@@ -3,7 +3,7 @@ from pathlib import Path
 
 from ..schema import Annotation, AnnotationItem, BBox
 from ..registry import register_format
-from .common import resolve_image_path, resolve_image_wh
+from .common import resolve_image_wh
 
 
 def _parse_int(v):
@@ -18,24 +18,31 @@ def _parse_int(v):
 def load_labelme(
     path: str,
     image_path: str | None = None,
-    names: list[str] = [],
+    width: int | None = None,
+    height: int | None = None,
+    names: list[str] | None = None,
     **kwargs,
 ) -> Annotation:
+    names = names or []
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    image_path = resolve_image_path(path, image_path, data.get("imagePath"))
-    width = _parse_int(data.get("imageWidth"))
-    height = _parse_int(data.get("imageHeight"))
+    image_name = data.get("imagePath")
+    extra = {"imagePath": image_name}
+    json_width = _parse_int(data.get("imageWidth"))
+    json_height = _parse_int(data.get("imageHeight"))
+    width = width if width is not None else json_width
+    height = height if height is not None else json_height
     
     if image_path:
+        extra["image_path"] = image_path
         width, height = resolve_image_wh(image_path, width, height)
     
     ann = Annotation(
-        image_path=image_path,
         width=width,
         height=height,
         names=names,
+        extra=extra,
     )
 
     for shape in data.get("shapes", []):
@@ -77,11 +84,13 @@ def dump_labelme(
     ann: Annotation,
     out_path: str,
 ):
+    image_name = ann.extra.get("imagePath", "")
+    image_path = ann.extra.get("image_path", image_name)
     data = {
         "version": "5.0.1",
         "flags": {},
         "shapes": [],
-        "imagePath": Path(ann.image_path).name if ann.image_path else "",
+        "imagePath": Path(image_path).name if image_path else "",
         "imageData": None,
         "imageHeight": ann.height,
         "imageWidth": ann.width,

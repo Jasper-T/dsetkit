@@ -7,6 +7,8 @@ from ..registry import register_format
 def load_coco(
     path: str,
     image_path: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
     **kwargs,
 ):
     with open(path, "r", encoding="utf-8") as f:
@@ -67,11 +69,11 @@ def load_coco(
             )
 
         ann = Annotation(
-            image_path=image_path or img["file_name"],
-            width=img.get("width"),
-            height=img.get("height"),
+            width=width if width is not None else img.get("width"),
+            height=height if height is not None else img.get("height"),
             items=items,
             names=list(categories.values()),
+            extra={"image_path": image_path or img["file_name"]},
         )
 
         results.append(ann)
@@ -123,10 +125,11 @@ def dump_coco(
     ann_id = 1
 
     for img_id, ann in enumerate(anns, start=1):
+        image_path = ann.extra.get("image_path", "")
         images.append(
             {
                 "id": img_id,
-                "file_name": ann.image_path,
+                "file_name": image_path,
                 "width": ann.width,
                 "height": ann.height,
             }

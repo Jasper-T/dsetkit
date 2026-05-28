@@ -1,9 +1,6 @@
 import struct
 import base64
 
-from PIL import Image
-
-
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path

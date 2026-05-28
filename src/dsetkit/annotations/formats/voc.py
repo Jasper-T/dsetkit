@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 from ..schema import Annotation, AnnotationItem, BBox
 from ..registry import register_format
-from .common import resolve_image_path, resolve_image_wh
+from .common import resolve_image_wh
 
 
 def _parse_xml_int(parent, tag: str) -> int | None:
@@ -29,27 +29,35 @@ def _get_float(b, tag: str, default=0.0) -> float:
 def load_voc(
     path: str,
     image_path: str | None = None,
-    names: list[str] = [],
+    width: int | None = None,
+    height: int | None = None,
+    names: list[str] | None = None,
     **kwargs,
 ) -> Annotation:
+    names = names or []
     tree = ET.parse(path)
     root = tree.getroot()
 
-    filename = root.findtext("filename")
-    image_path = resolve_image_path(path, image_path, filename)
-    
+    file_name = root.findtext("filename")
+    extra = {
+        "filename": file_name
+    }
+
     size = root.find("size")
-    width = _parse_xml_int(size, "width")
-    height = _parse_xml_int(size, "height")
+    xml_width = _parse_xml_int(size, "width")
+    xml_height = _parse_xml_int(size, "height")
+    width = width if width is not None else xml_width
+    height = height if height is not None else xml_height
 
     if image_path:
+        extra["image_path"] = image_path
         width, height = resolve_image_wh(image_path, width, height)
     
     ann = Annotation(
-        image_path=image_path,
         width=width,
         height=height,
         names=names,
+        extra=extra,
     )
 
     for obj in root.findall("object"):
@@ -85,11 +93,13 @@ def dump_voc(
     out_path: str,
 ):
     root = ET.Element("annotation")
-
+    file_name = ann.extra.get("filename", "")
+    image_path = ann.extra.get("image_path", file_name)
+    
     ET.SubElement(
         root,
         "filename",
-    ).text = str(ann.image_path)
+    ).text = str(image_path)
 
     size = ET.SubElement(root, "size")
 

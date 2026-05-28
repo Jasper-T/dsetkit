@@ -57,7 +57,7 @@ class Evaluator:
         annotations = load(
             image_path=image_path,
             label_path=label_path,
-            fmt=self.dataset.input_format,
+            fmt=self.dataset.source_format,
             names=self.names
         )
 

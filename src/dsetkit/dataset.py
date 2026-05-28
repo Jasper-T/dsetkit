@@ -2,9 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from .utils.image import get_image_paths
 from .annotations.formats import FORMAT_SUFFIXES
-from .utils.image import get_image_paths, read_image_info
-from .utils.file import build_stem_index
 
 
 @dataclass(slots=True)
@@ -13,80 +12,87 @@ class DatasetSample:
     label_path: Path | None = None
 
 
-LABEL_PRIORITY = {
-    "yolo": 0,      # txt
-    "coco": 1,      # json
-    "labelme": 1,   # json 同级
-    "voc": 2,       # xml
-}
-
-
 class Dataset:
     def __init__(
         self,
-        image_dir: str | Path,
-        label_dir: str | Path,
         names: list[str],
-        input_format: str ,
+        image_dir: str | Path,
+        label_dir: str | Path | None = None,
+        source_format: str | None = None,
     ):
         self.names = names
-        self.input_format = input_format.lower()
 
-        self._init_dirs(image_dir, label_dir)
-
-        self._init_label_index(label_dir)
-        
-        self.samples = self._build_samples()
-
-
-    def _init_dirs(self, image_dir, label_dir):
         self.image_dir = Path(image_dir)
-        if not self.image_dir.is_dir():
-            raise ValueError(f"Invalid image_dir: {self.image_dir}")
+        self.label_dir = Path(label_dir) if label_dir else None
+        self.source_format = source_format.lower() if source_format else None
 
-        self.label_dir = Path(label_dir)
-        if not self.label_dir.is_dir():
-            raise ValueError(f"Invalid label_dir: {self.label_dir}")
+        # --- runtime index ---
+        self.image_paths: list[Path] = []
+        self.label_map: dict[str, Path] = {}
 
+        self._built = False
 
-    def _init_label_index(self, label_dir):
-        self._label_index = (
-            build_stem_index(
-                directory=label_dir,
-                format_suffixes=FORMAT_SUFFIXES,
-                format_priority=LABEL_PRIORITY,
-            )
-            if label_dir is not None
-            else {}
-        )
+    # -------------------------
+    # build (MAIN PROCESS ONLY)
+    # -------------------------
+    def build(self):
+        """Call this BEFORE DataLoader workers start."""
+        self.image_dir = self._check_dir(self.image_dir)
 
+        self.image_paths = get_image_paths(self.image_dir)
 
-    def _build_samples(self):
+        if self.label_dir is not None:
+            self.label_dir = self._check_dir(self.label_dir)
 
-        image_paths = get_image_paths(self.image_dir)
+            if self.source_format not in FORMAT_SUFFIXES:
+                raise ValueError(f"Unsupported format: {self.source_format}")
 
-        samples = []
+            suffix = FORMAT_SUFFIXES[self.source_format]
 
-        for image_path in image_paths:
+            self.label_map = {
+                p.stem: p
+                for p in self.label_dir.iterdir()
+                if p.suffix == suffix
+            }
 
-            samples.append(
-                DatasetSample(
-                    image_path=image_path,
-                    label_path=self._find_label_path(image_path)
-                )
-            )
+        self._built = True
 
-        return samples
-
-
-    def _find_label_path(self, image_path: Path) -> Path | None:
-        return self._label_index.get(image_path.stem)
-
+    # -------------------------
+    # worker-safe hooks
+    # -------------------------
     def __len__(self) -> int:
-        return len(self.samples)
+        self._assert_built()
+        return len(self.image_paths)
 
-    def __getitem__(self, index: int) -> DatasetSample:
-        return self.samples[index]
+    def __getitem__(self, idx: int) -> DatasetSample:
+        self._assert_built()
+
+        image_path = self.image_paths[idx]
+        label_path = self.label_map.get(image_path.stem)
+
+        return DatasetSample(image_path, label_path)
 
     def __iter__(self) -> Iterator[DatasetSample]:
-        return iter(self.samples)
+        self._assert_built()
+
+        for i in range(len(self.image_paths)):
+            yield self[i]
+
+    # -------------------------
+    # safety
+    # -------------------------
+    def _assert_built(self):
+        if not self._built:
+            raise RuntimeError(
+                "Dataset not built. Call dataset.build() before DataLoader."
+            )
+
+    # -------------------------
+    # utils
+    # -------------------------
+    @staticmethod
+    def _check_dir(path: Path) -> Path:
+        path = path.expanduser().resolve()
+        if not path.is_dir():
+            raise ValueError(f"Invalid directory: {path}")
+        return path

@@ -3,13 +3,13 @@ from pathlib import Path
 from .registry import get_dumper, get_loader
 from .formats import FORMAT_SUFFIXES
 from .schema import Annotation
+from ..utils.file import ensure_dir
 
 # trigger adapter registration
 from . import formats  # noqa: F401
 
 
 FORMAT_DIRS = {
-    "coco": "coco",
     "labelme": "labelme",
     "voc": "xmls",
     "yolo": "labels",
@@ -29,42 +29,38 @@ def get_label_file_suffix(fmt: str) -> str:
     return suffix
 
 
-def get_label_path(image_path: str, label_dir: str, fmt: str) -> str:
+def new_label_path(old_path: str, label_dir: str, fmt: str) -> str:
     suffix = get_label_file_suffix(fmt)
     
-    label_file = f"{Path(image_path).stem}{suffix}"
+    new_file_name = f"{Path(old_path).stem}{suffix}"
     
-    label_path = Path(label_dir) / label_file
-    return str(label_path)
+    new_path = Path(label_dir) / new_file_name
+    return str(new_path)
 
 
-def default_label_dir(image_path: str, fmt: str) -> str:
+def new_label_dir(old_path: str, fmt: str, new_dir: str | None = None) -> str:
     name = get_label_dir_name(fmt)
-    label_dir = Path(image_path).parent.parent / name
-    ensure_dir(label_dir)
-    return str(label_dir)
-
-
-def auto_label_path(image_path: str, fmt: str, label_dir: str | None = None) -> str:
-    if label_dir is None:
-        label_dir = default_label_dir(image_path, fmt)
+    if new_dir is None:
+        new_dir = Path(old_path).parent.parent
     else:
-        name = get_label_dir_name(fmt)
-        label_dir = Path(label_dir) / name
-        ensure_dir(label_dir)
+        new_dir = Path(new_dir)
+    
+    new_dir = new_dir / name
+    ensure_dir(new_dir)
+    return str(new_dir)
 
-    label_path = get_label_path(image_path, label_dir, fmt)
-    return label_path
 
-
-def ensure_dir(path: str | Path) -> None:
-    Path(path).mkdir(parents=True, exist_ok=True)
+def auto_label_path(old_path: str, fmt: str, new_dir: str | None = None) -> str:
+    new_dir = new_label_dir(old_path, fmt, new_dir)
+    return new_label_path(old_path, new_dir, fmt)
 
 
 def load(
     *,
     label_path: str,
-    image_path: str,
+    image_path: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
     fmt: str,
     **kwargs,
 ) -> Annotation:
@@ -72,7 +68,6 @@ def load(
     Load annotation file into unified Annotation schema.
     fmt is the target format.
     supported formats are:
-    - coco
     - labelme
     - voc
     - yolo
@@ -85,8 +80,12 @@ def load(
     loader = get_loader(fmt)
 
     load_kwargs = dict(kwargs)
-
-    load_kwargs.setdefault("image_path", image_path)
+    if image_path is not None:
+        load_kwargs.setdefault("image_path", image_path)
+    if width is not None:
+        load_kwargs.setdefault("width", width)
+    if height is not None:
+        load_kwargs.setdefault("height", height)
 
     return loader(label_path, **load_kwargs)
 
@@ -101,7 +100,6 @@ def dump(
     Dump Annotation schema to target format.
     target format is one of the supported formats.
     supported formats are:
-    - coco
     - labelme
     - voc
     - yolo
@@ -112,11 +110,10 @@ def dump(
     return dumper(ann, path, **kwargs)
 
 
-
 def convert(
     *,
     label_path: str,
-    image_path: str,
+    image_path: str | None = None,
     target_format: str,
     source_format: str,
     out_dir: str | None = None,
@@ -126,7 +123,6 @@ def convert(
     Convert annotation format.
     fmt is the source format; target_format is the output format.
     supported formats are:
-    - coco
     - labelme
     - voc
     - yolo
@@ -140,7 +136,11 @@ def convert(
         **kwargs,
     )
 
-    out_path = auto_label_path(image_path, target_format, out_dir)
+    out_path = auto_label_path(
+        old_path = label_path, 
+        fmt = target_format, 
+        new_dir = out_dir
+    )
 
     dump(ann, out_path, fmt=target_format)
 

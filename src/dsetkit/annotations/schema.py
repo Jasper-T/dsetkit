@@ -30,8 +30,6 @@ class AnnotationItem:
 
 @dataclass
 class Annotation:
-    image_path: str
-
     width: Optional[int] = None
     height: Optional[int] = None
 

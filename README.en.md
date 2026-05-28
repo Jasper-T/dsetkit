@@ -23,10 +23,10 @@ Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 ## Features
 
 | Module | Capability |
-|------|------|
-| **Annotation I/O** | Read/write **COCO / LabelMe / VOC / YOLO** with a unified `Annotation` schema |
+| ------ | ------ |
+| **Annotation I/O** | Read/write **LabelMe / VOC / YOLO** with a unified `Annotation` schema |
 | **Format Conversion** | Single-file `convert` and large-scale `batch_convert` (multiprocessing supported) |
-| **Dataset** | Auto-pair images and labels by filename stem, with priority selection when multiple formats coexist |
+| **Dataset** | Auto-pair images and labels by filename stem, with suffix filtering driven by `source_format` |
 | **Evaluation** | IoU-based TP/FP matching, mAP@0.5, Precision / Recall / F1 (per-class and overall) |
 | **Image Utilities** | Read JPEG/PNG/WebP/BMP metadata without full decoding; natural sorting traversal |
 | **Visualization** | `Plotter` draws detection boxes on images (optional OpenCV dependency) |
@@ -47,7 +47,7 @@ pip install -e .
 pip install -e ".[visualize]"
 ```
 
-Requires **Python >= 3.11**. Core dependencies: `numpy`, `natsort`.
+Requires **Python >= 3.11**. Core dependencies: `numpy`, `natsort`, `tqdm`.
 
 ---
 
@@ -97,8 +97,9 @@ dataset = Dataset(
     image_dir="images/train",
     label_dir="labels/labelme",
     names=["cat", "dog"],
-    input_format="labelme",
+    source_format="labelme",
 )
+dataset.build()
 
 # convert only labeled samples
 pairs = [s for s in dataset if s.label_path is not None]
@@ -116,7 +117,7 @@ paths = batch_convert(
 
 ### 3. Build dataset index
 
-`Dataset` scans the image directory and finds matching label files by stem. If multiple suffixes exist for the same stem (for example `.txt` and `.json`), priority is: **yolo > coco/labelme > voc**.
+`Dataset` scans the image directory and finds matching label files by stem, then filters by the suffix of `source_format` (`labelme -> .json`, `voc -> .xml`, `yolo -> .txt`).
 
 ```python
 from dsetkit import Dataset
@@ -125,8 +126,9 @@ dataset = Dataset(
     image_dir="images/val",
     label_dir="labels",
     names=["person", "car"],
-    input_format="voc",
+    source_format="voc",
 )
+dataset.build()
 
 print(len(dataset))
 for sample in dataset:
@@ -151,8 +153,9 @@ dataset = Dataset(
     image_dir="images/val",
     label_dir="labels/yolo",
     names=["person"],
-    input_format="yolo",
+    source_format="yolo",
 )
+dataset.build()
 
 metrics = MyEvaluator(dataset).evaluate(
     conf_threshold=0.5,
@@ -187,8 +190,7 @@ See [`examples/`](examples/) and [`tests/demo.py`](tests/demo.py) for runnable e
 ## Supported Annotation Formats
 
 | Format | Identifier | File Suffix | Notes |
-|------|--------|----------|------|
-| COCO | `coco` | `.json` | JSON for detection/instance tasks |
+| ------ | -------- | ---------- | ------ |
 | LabelMe | `labelme` | `.json` | Common interactive labeling export |
 | Pascal VOC | `voc` | `.xml` | XML detection annotation |
 | YOLO | `yolo` | `.txt` | Normalized `class cx cy w h` |
@@ -201,8 +203,9 @@ Formats are extensible through the registry (`register_format`). See `src/dsetki
 
 ```text
 Annotation
-├── image_path, width, height
+├── width, height
 ├── names: list[str]
+├── extra: dict[str, Any]
 └── items: list[AnnotationItem]
     ├── category, category_id
     ├── bbox: BBox(x1, y1, x2, y2)   # absolute pixels, top-left to bottom-right
@@ -218,6 +221,7 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema, io, convert, format adapters
 │   ├── dataset.py         # Dataset / DatasetSample
+│   ├── tools.py           # convenience helpers for batch convert/visualize
 │   ├── evaluator.py       # detection evaluation base class
 │   ├── metrics.py         # IoU, AP, P/R/F1
 │   ├── utils/             # image metadata, file indexing

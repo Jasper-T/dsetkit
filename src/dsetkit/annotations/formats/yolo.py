@@ -5,16 +5,21 @@ from .common import resolve_image_wh
 
 def load_yolo(
     path: str,
-    image_path: str,
+    image_path: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
     names: list[str] | None = None,
 ):
-    width, height = resolve_image_wh(image_path, None, None)
+    if image_path:
+        width, height = resolve_image_wh(image_path, width, height)
+    elif width is None or height is None:
+        raise ValueError("width and height are required when image_path is not provided")
 
     ann = Annotation(
-        image_path=image_path,
         width=width,
         height=height,
         names=names or [],
+        extra={"image_path": image_path} if image_path else {},
     )
 
     with open(path, "r", encoding="utf-8") as f:

@@ -4,7 +4,8 @@ import numpy as np
 
 from typing import Sequence, Tuple, Optional, Union 
 
-from ..annotations.schema import AnnotationItem
+from ..annotations.schema import AnnotationItem, Annotation
+from ..annotations.io import load
 
 
 class Plotter:
@@ -184,7 +185,7 @@ class Plotter:
         )
 
         if name != "":
-            text = name
+            text = str(name)
 
             if score is not None:
                 text += f": {score:.2f}"
@@ -228,3 +229,43 @@ class Plotter:
 
     def get(self):
         return self.image
+
+
+def plot(
+    image: np.ndarray | None = None, 
+    image_path: str | Path | None = None, 
+    label_path: str | Path | None = None,
+    anno_schema: Annotation | None = None,
+    fmt: str  = 'yolo', 
+    names: list[str] = None,
+    save_path: str | Path | None = None
+):
+
+    if image is None:
+        if image_path is None:
+            raise ValueError("image_path is required when image is not provided")
+        image = cv2.imread(image_path)
+    
+    if anno_schema is None:
+        if label_path is None:
+            raise ValueError("label_path is required when anno_schema is not provided")
+        
+        anno_schema = load(
+            label_path=label_path, 
+            image_path=image_path, 
+            fmt=fmt, 
+            names=names
+        )
+        
+    plotter = Plotter(image)
+    for item in anno_schema.items:
+        plotter.detection_from_schema(item)
+    
+    if save_path is not None:
+        plotter.save(save_path)
+    
+    return plotter.get()
+
+
+
+        
