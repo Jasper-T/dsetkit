@@ -77,6 +77,13 @@ def read_image_info(
     return reader(path)
 
 
+def resolve_image_wh(image_path, width, height):
+    if width is not None and height is not None:
+        return width, height
+    
+    info = read_image_info(image_path)
+    return info.width, info.height
+
 def iter_image_paths(
     directory: str | Path,
 ) -> Iterator[Path]:

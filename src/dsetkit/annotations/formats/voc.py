@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 from ..schema import Annotation, AnnotationItem, BBox
 from ..registry import register_format
-from .common import resolve_image_wh
+from ...utils.image  import resolve_image_wh
 
 
 def _parse_xml_int(parent, tag: str) -> int | None:

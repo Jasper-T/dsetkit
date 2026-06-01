@@ -1,4 +1,4 @@
-from dsetkit.dataset import Dataset, DatasetSample
+from .dataset import Dataset, DatasetSample
 
 __all__ = [
     "Dataset",

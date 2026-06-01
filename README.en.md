@@ -2,7 +2,7 @@
 
 Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 
-**Deep learning dataset infrastructure toolkit** — a Python toolkit for object detection and annotation pipelines, with a unified annotation schema, multi-format conversion, dataset indexing, evaluation metrics, and visualization.
+**Deep learning dataset infrastructure toolkit** — a Python toolkit for object detection and annotation pipelines, with a unified annotation schema, multi-format conversion, dataset indexing, splitting and augmentation, evaluation metrics, and visualization.
 
 [![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](pyproject.toml)
@@ -25,29 +25,25 @@ Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 | Module | Capability |
 | ------ | ------ |
 | **Annotation I/O** | Read/write **LabelMe / VOC / YOLO** with a unified `Annotation` schema |
-| **Format Conversion** | Single-file `convert` and large-scale `batch_convert` (multiprocessing supported) |
+| **Format Conversion** | Single-file `convert`; dataset-scale `convert_dataset` / `convert_dirs` |
 | **Dataset** | Auto-pair images and labels by filename stem, with suffix filtering driven by `source_format` |
+| **Split and Export** | Export image path lists to txt; randomly split into train/val/test by ratio |
+| **Augmentation** | Horizontal/vertical flip; 90°/180°/270° clockwise rotation with synced bboxes |
 | **Evaluation** | IoU-based TP/FP matching, mAP@0.5, Precision / Recall / F1 (per-class and overall) |
 | **Image Utilities** | Read JPEG/PNG/WebP/BMP metadata without full decoding; natural sorting traversal |
-| **Visualization** | `Plotter` draws detection boxes on images (optional OpenCV dependency) |
+| **Visualization** | `Plotter` draws detection boxes on images (OpenCV included in base install) |
 
 ---
 
 ## Installation
 
-**Base install** (annotations, dataset, metrics):
+**Base install** (annotations, dataset, augmentation, visualization, metrics):
 
 ```bash
 pip install -e .
 ```
 
-**With visualization** (requires OpenCV):
-
-```bash
-pip install -e ".[visualize]"
-```
-
-Requires **Python >= 3.11**. Core dependencies: `numpy`, `natsort`, `tqdm`.
+Requires **Python >= 3.11**. Core dependencies: `numpy`, `natsort`, `opencv-python`, `tqdm`.
 
 ---
 
@@ -85,37 +81,7 @@ dump(ann, "output/label.txt", fmt="yolo")
 
 > **Note**: For **YOLO** read/write, pass `names` to `load` when possible (class id -> class name). For YOLO `dump`, `Annotation` must include valid `width`/`height`, and each object needs `category_id` or a resolvable class via `ann.names`.
 
-### 2. Batch conversion
-
-Designed for very large datasets (100k+ samples). Outputs are written as `out_dir / {stem}{suffix}`.
-
-```python
-from dsetkit.annotations.convert import batch_convert
-from dsetkit import Dataset
-
-dataset = Dataset(
-    image_dir="images/train",
-    label_dir="labels/labelme",
-    names=["cat", "dog"],
-    source_format="labelme",
-)
-dataset.build()
-
-# convert only labeled samples
-pairs = [s for s in dataset if s.label_path is not None]
-
-paths = batch_convert(
-    pairs,
-    source_fmt="labelme",
-    target_format="yolo",
-    out_dir="labels/yolo",
-    names=["cat", "dog"],
-    max_workers=8,          # None for single-process; on Windows use __main__ guard for multiprocessing
-    errors="raise",         # or "skip" to return (success_paths, failure_list)
-)
-```
-
-### 3. Build dataset index
+### 2. Build dataset index
 
 `Dataset` scans the image directory and finds matching label files by stem, then filters by the suffix of `source_format` (`labelme -> .json`, `voc -> .xml`, `yolo -> .txt`).
 
@@ -135,7 +101,7 @@ for sample in dataset:
     print(sample.image_path, sample.label_path)
 ```
 
-### 4. Evaluate object detection
+### 3. Evaluate object detection
 
 Subclass `Evaluator` and implement `_load_predictions` to compute metrics on a fixed annotation format:
 
@@ -167,7 +133,7 @@ metrics = MyEvaluator(dataset).evaluate(
 
 Terminal output follows a YOLO-style validation table (`Class / Instances / P / R / mAP50 / F1`).
 
-### 5. Visualize annotations
+### 4. Visualize annotations
 
 ```python
 import cv2
@@ -184,6 +150,60 @@ plotter.save("vis.jpg")
 ```
 
 See [`examples/`](examples/) and [`tests/demo.py`](tests/demo.py) for runnable examples.
+
+### 5. Dataset batch operations
+
+Convenience helpers in `dsetkit.tools` for large-scale convert, export, and split workflows:
+
+```python
+from dsetkit import Dataset
+from dsetkit.tools import convert_dirs, export_dirs, split_dirs
+
+# LabelMe -> YOLO (skips samples without labels)
+convert_dirs(
+    image_dir="images/train",
+    label_dir="labels/labelme",
+    source_format="labelme",
+    target_format="yolo",
+    names=["cat", "dog"],
+    out_dir="labels/yolo",
+)
+
+# Export all image paths to a txt file
+export_dirs(image_dir="images/train", txt_path="all.txt")
+
+# Split into train/val/test txt files (default 0.75 / 0.15 / 0.1)
+split_dirs(image_dir="images/train", out_dir="splits", seed=42)
+```
+
+### 6. Augmentation (flip / rotate)
+
+Apply synchronized image and label transforms; outputs go to `out_dir/images/` and the format-specific label folder:
+
+```python
+from dsetkit.tools import flip_dirs, rotate_dirs
+
+# Horizontal flip (direction=1); use direction=0 for vertical
+flip_dirs(
+    image_dir="images/train",
+    label_dir="labels/voc",
+    source_format="voc",
+    out_dir="augment/flipped",
+    direction=1,
+)
+
+# Rotate 90° clockwise (also supports 180 and 270)
+rotate_dirs(
+    image_dir="images/train",
+    label_dir="labels/yolo",
+    source_format="yolo",
+    names=["person"],
+    out_dir="augment/rot90",
+    angle=90,
+)
+```
+
+For single-sample or schema-level APIs, see `dsetkit.augment` (e.g. `flip_annotation`, `rotate_label`).
 
 ---
 
@@ -203,7 +223,7 @@ Formats are extensible through the registry (`register_format`). See `src/dsetki
 
 ```text
 Annotation
-├── width, height
+├── width, height          # require_size() validates dimensions before export/augment
 ├── names: list[str]
 ├── extra: dict[str, Any]
 └── items: list[AnnotationItem]
@@ -219,13 +239,15 @@ Annotation
 ```text
 dsetkit/
 ├── src/dsetkit/
-│   ├── annotations/       # schema, io, convert, format adapters
+│   ├── annotations/       # schema, io, format adapters
+│   ├── augment/           # flip / rotate (image + label)
 │   ├── dataset.py         # Dataset / DatasetSample
-│   ├── tools.py           # convenience helpers for batch convert/visualize
+│   ├── split.py           # train/val/test splitting
+│   ├── tools.py           # batch convert/plot/augment/split helpers
 │   ├── evaluator.py       # detection evaluation base class
 │   ├── metrics.py         # IoU, AP, P/R/F1
 │   ├── utils/             # image metadata, file indexing
-│   └── visualize/         # Plotter (optional opencv)
+│   └── visualize/         # Plotter
 ├── examples/              # conversion examples
 └── tests/                 # demo and tests
 ```

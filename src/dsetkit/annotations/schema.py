@@ -40,6 +40,11 @@ class Annotation:
 
     extra: Dict[str, Any] = field(default_factory=dict)
 
+    def require_size(self) -> tuple[int, int]:
+        if self.width is None or self.height is None:
+            raise ValueError("Annotation width/height required")
+        return self.width, self.height
+
     def to_array(self):
         rows = []
         for item in self.items:

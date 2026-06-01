@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Remove Python bytecode caches under a target directory."""
 
-from __future__ import annotations
-
 import argparse
 import shutil
 from pathlib import Path

@@ -7,6 +7,49 @@ and this project adheres to Semantic Versioning.
 
 ---
 
+## [Unreleased]
+
+---
+
+## [0.3.0] - 2026-06-01
+
+### Added
+
+- Added `dsetkit.augment` module with flip and rotate helpers:
+  - Schema-level: `flip_annotation`, `flip_annotation_horizontal`, `flip_annotation_vertical`, `rotate_annotation`
+  - File-level: `flip_image`, `flip_label`, `rotate_image`, `rotate_label`, `rotate_sample`
+- Added `dsetkit.split` module:
+  - `split_paths(...)` — shuffle image paths into train/val/test buckets
+  - `save_split_txts(...)` — write split lists to txt files
+  - `split_tvt(...)` — split paths from an existing txt file
+- Extended `dsetkit.tools` with dataset-scale helpers:
+  - `flip_dataset(...)` / `flip_dirs(...)`
+  - `rotate_dataset(...)` / `rotate_dirs(...)`
+  - `export_dataset(...)` / `export_dirs(...)` — export image path lists to txt
+  - `split_dataset(...)` / `split_dirs(...)` — generate train/val/test txt splits
+- Added `Annotation.require_size()` to validate and return `(width, height)`.
+- Added `load_txt(...)`, `save_txt(...)`, and `rm_empty_dirs(...)` in `dsetkit.utils.file`.
+- Added `resolve_image_wh(...)` in `dsetkit.utils.image` (shared by format adapters).
+- Added tests: `tests/test_flip.py`, `tests/test_rotate.py`, `tests/test_split.py`.
+
+### Changed
+
+- `opencv-python` is now a core runtime dependency (required by augment and visualization workflows).
+- Moved `resolve_image_wh(...)` from `dsetkit.annotations.formats.common` to `dsetkit.utils.image`.
+- YOLO dumper now uses `ann.require_size()` instead of inline width/height checks.
+- Removed `[visualize]` optional dependency group; OpenCV is installed via core dependencies.
+
+### Removed
+
+- `dsetkit.annotations.convert` module and `batch_convert(...)` API.
+- `dsetkit.annotations.formats.common` module.
+
+### Breaking
+
+- `pip install -e ".[visualize]"` is removed; use `pip install -e .` (OpenCV is included in core dependencies).
+
+---
+
 ## [0.2.0] - 2026-05-28
 
 ### Added

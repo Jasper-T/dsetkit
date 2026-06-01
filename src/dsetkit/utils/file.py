@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from typing import Iterable, Union, Mapping
 
@@ -53,6 +54,58 @@ def save_txt(paths: list, txt_path: str | Path):
 
 def ensure_dir(path: str | Path) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def rm_empty_dirs(root_dir: str | Path) -> list[Path]:
+    root = Path(root_dir).resolve()
+    if not root.is_dir():
+        raise ValueError(f"Invalid directory: {root}")
+
+    removed_dirs: list[Path] = []
+    dirs = sorted(
+        (path for path in root.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.relative_to(root).parts),
+        reverse=True,
+    )
+
+    for directory in dirs:
+        if any(directory.iterdir()):
+            continue
+
+        directory.rmdir()
+        removed_dirs.append(directory)
+
+    return removed_dirs
+
+
+def flatten_dir(root_dir: str | Path) -> list[tuple[Path, Path]]:
+    root = Path(root_dir).resolve()
+    if not root.is_dir():
+        raise ValueError(f"Invalid directory: {root}")
+
+    def unique_target_path(path: Path) -> Path:
+        target_path = root / path.name
+        if not target_path.exists():
+            return target_path
+
+        index = 1
+        while True:
+            candidate = root / f"{path.stem}_{index}{path.suffix}"
+            if not candidate.exists():
+                return candidate
+            index += 1
+
+    moved_paths: list[tuple[Path, Path]] = []
+    for src_path in sorted(root.rglob("*")):
+        if not src_path.is_file() or src_path.parent == root:
+            continue
+
+        dst_path = unique_target_path(src_path)
+        shutil.move(str(src_path), str(dst_path))
+        moved_paths.append((src_path, dst_path))
+
+    rm_empty_dirs(root)
+    return moved_paths
 
 
 def merge_txt_files(

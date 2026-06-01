@@ -2,7 +2,7 @@
 
 Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 
-**Deep learning dataset infrastructure toolkit** — 面向目标检测与标注流水线的 Python 工具库：统一标注 schema、多格式互转、数据集索引、检测指标评估与可视化。
+**Deep learning dataset infrastructure toolkit** — 面向目标检测与标注流水线的 Python 工具库：统一标注 schema、多格式互转、数据集索引、划分与增强、检测指标评估与可视化。
 
 [![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](pyproject.toml)
@@ -25,29 +25,25 @@ Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 | 模块 | 能力 |
 | ------ | ------ |
 | **标注 I/O** | 在统一 `Annotation` schema 下读写 **LabelMe / VOC / YOLO** |
-| **格式转换** | 单文件 `convert`、大规模 `batch_convert`（支持多进程） |
+| **格式转换** | 单文件 `convert`；数据集级 `convert_dataset` / `convert_dirs` |
 | **数据集** | 按文件名 stem 自动配对图像与标签，并基于 `source_format` 过滤标签后缀 |
+| **划分与导出** | 将图像路径列表导出为 txt，并按比例随机划分 train/val/test |
+| **数据增强** | 水平/垂直翻转，90°/180°/270° 顺时针旋转（同步更新检测框） |
 | **评估** | 基于 IoU 的 TP/FP 匹配、mAP@0.5、Precision / Recall / F1（类级与整体） |
 | **图像工具** | 无需完整解码即可读取 JPEG/PNG/WebP/BMP 尺寸；自然排序遍历 |
-| **可视化** | `Plotter` 在图像上绘制检测框（可选依赖 OpenCV） |
+| **可视化** | `Plotter` 在图像上绘制检测框（依赖 OpenCV，已包含在基础安装中） |
 
 ---
 
 ## 安装
 
-**基础安装**（标注、数据集、指标）：
+**基础安装**（标注、数据集、增强、可视化、指标）：
 
 ```bash
 pip install -e .
 ```
 
-**含可视化**（需要 OpenCV）：
-
-```bash
-pip install -e ".[visualize]"
-```
-
-要求 **Python ≥ 3.11**。核心依赖：`numpy`、`natsort`、`tqdm`。
+要求 **Python ≥ 3.11**。核心依赖：`numpy`、`natsort`、`opencv-python`、`tqdm`。
 
 ---
 
@@ -85,37 +81,7 @@ dump(ann, "output/label.txt", fmt="yolo")
 
 > **注意**：读写 **YOLO** 格式时，`load` 建议传入 `names`（类别 id → 名称）；`dump` 到 YOLO 要求 `Annotation` 已具备 `width`/`height`，且每个目标有 `category_id` 或可通过 `ann.names` 解析类别。
 
-### 2. 批量转换
-
-适合十万级样本；输出路径统一为 `out_dir / {stem}{suffix}`。
-
-```python
-from dsetkit.annotations.convert import batch_convert
-from dsetkit import Dataset
-
-dataset = Dataset(
-    image_dir="images/train",
-    label_dir="labels/labelme",
-    names=["cat", "dog"],
-    source_format="labelme",
-)
-dataset.build()
-
-# 仅转换有标签的样本
-pairs = [s for s in dataset if s.label_path is not None]
-
-paths = batch_convert(
-    pairs,
-    source_fmt="labelme",
-    target_format="yolo",
-    out_dir="labels/yolo",
-    names=["cat", "dog"],
-    max_workers=8,          # None 为单进程；Windows 下多进程需在 __main__ 中调用
-    errors="raise",         # 或 "skip" 返回 (成功路径, 失败列表)
-)
-```
-
-### 3. 构建数据集索引
+### 2. 构建数据集索引
 
 `Dataset` 扫描图像目录，按 stem 在标签目录中查找对应标注文件，并按 `source_format` 对应后缀进行匹配（`labelme -> .json`, `voc -> .xml`, `yolo -> .txt`）。
 
@@ -135,7 +101,7 @@ for sample in dataset:
     print(sample.image_path, sample.label_path)
 ```
 
-### 4. 目标检测评估
+### 3. 目标检测评估
 
 继承 `Evaluator` 并实现 `_load_predictions`，即可对固定标注格式计算指标：
 
@@ -167,7 +133,7 @@ metrics = MyEvaluator(dataset).evaluate(
 
 终端输出风格类似 YOLO 验证表（`Class / Instances / P / R / mAP50 / F1`）。
 
-### 5. 可视化标注
+### 4. 可视化标注
 
 ```python
 import cv2
@@ -184,6 +150,60 @@ plotter.save("vis.jpg")
 ```
 
 示例数据与脚本见 [`examples/`](examples/) 与 [`tests/demo.py`](tests/demo.py)。
+
+### 5. 数据集批量操作
+
+基于 `Dataset` 的便捷入口（`dsetkit.tools`），适合大规模转换、导出与划分：
+
+```python
+from dsetkit import Dataset
+from dsetkit.tools import convert_dirs, export_dirs, split_dirs
+
+# LabelMe → YOLO（跳过无标签样本）
+convert_dirs(
+    image_dir="images/train",
+    label_dir="labels/labelme",
+    source_format="labelme",
+    target_format="yolo",
+    names=["cat", "dog"],
+    out_dir="labels/yolo",
+)
+
+# 导出全部图像路径
+export_dirs(image_dir="images/train", txt_path="all.txt")
+
+# 按比例划分 train/val/test txt（默认 0.75 / 0.15 / 0.1）
+split_dirs(image_dir="images/train", out_dir="splits", seed=42)
+```
+
+### 6. 数据增强（翻转 / 旋转）
+
+对图像与标注同步增强，输出写入 `out_dir/images/` 与对应格式标签目录：
+
+```python
+from dsetkit.tools import flip_dirs, rotate_dirs
+
+# 水平翻转（direction=1）；垂直翻转为 direction=0
+flip_dirs(
+    image_dir="images/train",
+    label_dir="labels/voc",
+    source_format="voc",
+    out_dir="augment/flipped",
+    direction=1,
+)
+
+# 顺时针旋转 90°（亦支持 180、270）
+rotate_dirs(
+    image_dir="images/train",
+    label_dir="labels/yolo",
+    source_format="yolo",
+    names=["person"],
+    out_dir="augment/rot90",
+    angle=90,
+)
+```
+
+单样本或 schema 级 API 见 `dsetkit.augment`（如 `flip_annotation`、`rotate_label`）。
 
 ---
 
@@ -203,7 +223,7 @@ plotter.save("vis.jpg")
 
 ```text
 Annotation
-├── width, height
+├── width, height          # require_size() 可在导出/增强前校验尺寸
 ├── names: list[str]
 ├── extra: dict[str, Any]
 └── items: list[AnnotationItem]
@@ -219,13 +239,15 @@ Annotation
 ```text
 dsetkit/
 ├── src/dsetkit/
-│   ├── annotations/       # schema、io、convert、各格式适配器
+│   ├── annotations/       # schema、io、各格式适配器
+│   ├── augment/           # 翻转 / 旋转（图像 + 标注）
 │   ├── dataset.py         # Dataset / DatasetSample
-│   ├── tools.py           # 批量转换/可视化便捷入口
+│   ├── split.py           # train/val/test 划分
+│   ├── tools.py           # 批量转换/可视化/增强/划分便捷入口
 │   ├── evaluator.py       # 检测评估基类
 │   ├── metrics.py         # IoU、AP、P/R/F1
 │   ├── utils/             # 图像元信息、文件索引
-│   └── visualize/         # Plotter（可选 opencv）
+│   └── visualize/         # Plotter
 ├── examples/              # 转换示例
 └── tests/                 # demo 与测试
 ```

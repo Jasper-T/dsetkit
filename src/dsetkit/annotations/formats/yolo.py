@@ -1,6 +1,6 @@
 from ..schema import Annotation, AnnotationItem, BBox
 from ..registry import register_format
-from .common import resolve_image_wh
+from ...utils.image  import resolve_image_wh
 
 
 def load_yolo(
@@ -57,10 +57,7 @@ def dump_yolo(
     ann: Annotation,
     out_path: str,
 ):
-    width = ann.width
-    height = ann.height
-    if width is None or height is None:
-        raise ValueError("Annotation width/height required for YOLO export")
+    width, height = ann.require_size()
 
     lines = []
 
