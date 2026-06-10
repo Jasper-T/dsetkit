@@ -149,6 +149,20 @@ for item in ann.items:
 plotter.save("vis.jpg")
 ```
 
+You can also draw one box directly with a custom caption:
+
+```python
+plotter = Plotter(img)
+rendered = plotter.detection(
+    bbox=[50, 40, 180, 160],
+    class_id=1,
+    text="person: 0.98",
+)
+cv2.imwrite("vis.jpg", rendered)
+```
+
+`Plotter.detection(...)` now accepts optional `class_id`, renders custom `text` when provided, and returns the current image array.
+
 See [`examples/`](examples/) and [`tests/demo.py`](tests/demo.py) for runnable examples.
 
 ### 5. Dataset batch operations

@@ -149,6 +149,20 @@ for item in ann.items:
 plotter.save("vis.jpg")
 ```
 
+単一の検出枠を直接描画し、表示テキストを明示的に渡すこともできます。
+
+```python
+plotter = Plotter(img)
+rendered = plotter.detection(
+    bbox=[50, 40, 180, 160],
+    class_id=1,
+    text="person: 0.98",
+)
+cv2.imwrite("vis.jpg", rendered)
+```
+
+`Plotter.detection(...)` は `class_id` を省略可能になり、任意の `text` を描画でき、現在の画像配列を直接返します。
+
 実行例は [`examples/`](examples/) と [`tests/demo.py`](tests/demo.py) を参照してください。
 
 ### 5. データセットのバッチ操作

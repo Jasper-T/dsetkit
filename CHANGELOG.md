@@ -9,6 +9,15 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `Plotter.detection(...)` in `dsetkit.visualize.plot`:
+  - `class_id` is now optional
+  - `text` can be passed directly for custom label rendering
+  - the method now returns the rendered image array via `plotter.get()`
+- Updated `Plotter.label(...)` to accept a top-left `point` instead of a full bbox when placing label backgrounds.
+- Updated `Plotter.detection_from_schema(...)` to skip items without `bbox` and to compose display text from `category` plus optional `extra["score"]`.
+
 ---
 
 ## [0.3.0] - 2026-06-01

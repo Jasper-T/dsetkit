@@ -123,7 +123,7 @@ class Plotter:
 
     def label(
         self,
-        bbox: Sequence[int],
+        point: Sequence[int],
         text: str,
         color,
     ):
@@ -131,7 +131,7 @@ class Plotter:
         label background attached to bbox top
         """
 
-        x1, y1, _, _ = map(int, bbox)
+        x1, y1 = map(int, point)
 
         (tw, th), baseline = cv2.getTextSize(
             text,
@@ -173,37 +173,45 @@ class Plotter:
     def detection(
         self,
         bbox: Sequence[int],
-        class_id: int,
-        name: str = "",
-        score: Optional[float] = None,
-    ):
-        color = self.random_color(class_id)
+        class_id: int = None,
+        text: str = None, 
+    ):  
+        if class_id is None:
+            color = self.random_color(0)
+        else:
+            color = self.random_color(class_id)
 
         self.box(
             bbox,
             color,
         )
 
-        if name != "":
-            text = str(name)
-
-            if score is not None:
-                text += f": {score:.2f}"
-
+        if text is None and class_id is not None:
+            text = str(class_id)
+        if text is not None:
+            point = (bbox[0], bbox[1])
             self.label(
-                bbox,
-                text,
-                color,
+                point=point,
+                text=text,
+                color=color,
             )
 
-        return self
+        return self.get()
+    
     
     def detection_from_schema(self, item: AnnotationItem):
+        if item.bbox is None:
+            return self.get()
+        bbox = [item.bbox.x1, item.bbox.y1, item.bbox.x2, item.bbox.y2]
+        name = item.category or ""
+        score = item.extra.get("score")
+        class_id = item.category_id or 0
+        text = name if score is None else f"{name}: {score:.2f}"
+        
         return self.detection(
-            bbox=[item.bbox.x1, item.bbox.y1, item.bbox.x2, item.bbox.y2],
-            class_id=item.category_id or 0,
-            name=item.category or "",
-            score=item.extra.get("score"),
+            bbox=bbox,
+            class_id=class_id,
+            text=text,
         )
 
     def show(

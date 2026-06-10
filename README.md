@@ -149,6 +149,20 @@ for item in ann.items:
 plotter.save("vis.jpg")
 ```
 
+也可以直接绘制单个检测框，并传入自定义显示文本：
+
+```python
+plotter = Plotter(img)
+rendered = plotter.detection(
+    bbox=[50, 40, 180, 160],
+    class_id=1,
+    text="person: 0.98",
+)
+cv2.imwrite("vis.jpg", rendered)
+```
+
+`Plotter.detection(...)` 现在支持可选 `class_id`、自定义 `text`，并直接返回当前绘制后的图像数组。
+
 示例数据与脚本见 [`examples/`](examples/) 与 [`tests/demo.py`](tests/demo.py)。
 
 ### 5. 数据集批量操作
