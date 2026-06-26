@@ -9,14 +9,20 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+---
+
+## [0.3.1] - 2026-06-26
+
 ### Changed
 
-- Updated `Plotter.detection(...)` in `dsetkit.visualize.plot`:
-  - `class_id` is now optional
-  - `text` can be passed directly for custom label rendering
-  - the method now returns the rendered image array via `plotter.get()`
-- Updated `Plotter.label(...)` to accept a top-left `point` instead of a full bbox when placing label backgrounds.
-- Updated `Plotter.detection_from_schema(...)` to skip items without `bbox` and to compose display text from `category` plus optional `extra["score"]`.
+- Updated `split_tvt(...)` defaults in `dsetkit.split` to use a two-way `train/val` split ratio of `(0.8, 0.2)`.
+- `split_tvt(...)` now accepts a plain txt filename and automatically resolves it relative to `dataset_root`.
+
+### Added
+
+- `split_tvt(...)` can now bootstrap from `dataset_root/images` when the source txt file does not exist.
+- When bootstrapping from `dataset_root/images`, `split_tvt(...)` now saves the discovered image list to the requested txt file before writing split outputs.
+- `split_tvt(...)` now returns the generated split mapping for downstream reuse.
 
 ---
 
@@ -28,14 +34,14 @@ and this project adheres to Semantic Versioning.
   - Schema-level: `flip_annotation`, `flip_annotation_horizontal`, `flip_annotation_vertical`, `rotate_annotation`
   - File-level: `flip_image`, `flip_label`, `rotate_image`, `rotate_label`, `rotate_sample`
 - Added `dsetkit.split` module:
-  - `split_paths(...)` â€” shuffle image paths into train/val/test buckets
-  - `save_split_txts(...)` â€” write split lists to txt files
-  - `split_tvt(...)` â€” split paths from an existing txt file
+  - `split_paths(...)` â€?shuffle image paths into train/val/test buckets
+  - `save_split_txts(...)` â€?write split lists to txt files
+  - `split_tvt(...)` â€?split paths from an existing txt file
 - Extended `dsetkit.tools` with dataset-scale helpers:
   - `flip_dataset(...)` / `flip_dirs(...)`
   - `rotate_dataset(...)` / `rotate_dirs(...)`
-  - `export_dataset(...)` / `export_dirs(...)` â€” export image path lists to txt
-  - `split_dataset(...)` / `split_dirs(...)` â€” generate train/val/test txt splits
+  - `export_dataset(...)` / `export_dirs(...)` â€?export image path lists to txt
+  - `split_dataset(...)` / `split_dirs(...)` â€?generate train/val/test txt splits
 - Added `Annotation.require_size()` to validate and return `(width, height)`.
 - Added `load_txt(...)`, `save_txt(...)`, and `rm_empty_dirs(...)` in `dsetkit.utils.file`.
 - Added `resolve_image_wh(...)` in `dsetkit.utils.image` (shared by format adapters).
@@ -162,3 +168,4 @@ and this project adheres to Semantic Versioning.
 ### Breaking
 
 - N/A (initial release)
+

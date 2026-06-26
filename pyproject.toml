@@ -1,6 +1,6 @@
 [project]
 name = "dsetkit"
-version = "0.3.0"
+version = "0.3.1"
 description = "Deep learning dataset infrastructure toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,3 +23,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+

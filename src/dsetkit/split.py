@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .utils.file import load_txt, save_txt
-
+from .utils.image import get_image_paths
 
 def _validate_rates(rates: Sequence[float]) -> None:
     if len(rates) not in (1, 2, 3):
@@ -64,17 +64,29 @@ def save_split_txts(
 
 def split_tvt(
     dataset_root: str | Path,
-    txt_file_name: str | Path,
-    rates: Sequence[float] = (0.75, 0.15, 0.1),
+    txt_file_name: str,
+    rates: Sequence[float] = (0.8, 0.2),
     seed: int = 42,
     add_time: bool = False,
-) -> None:
-    """Split image paths from a txt file into train, val, and optional test txt files."""
+) -> dict[str, list[Path]]:
+    """Split image paths into train/val/test buckets and save the split txt files."""
     dataset_root = Path(dataset_root)
     txt_path = dataset_root / txt_file_name
-    image_paths = [Path(path) for path in load_txt(txt_path)]
+
+    if txt_path.is_file():
+        image_paths = [Path(path) for path in load_txt(txt_path)] 
+    else:
+        image_dir = dataset_root / "images"
+        if not image_dir.is_dir():
+            raise FileNotFoundError(f"Images dir not found: {image_dir}")
+
+        image_paths = get_image_paths(image_dir)
+        save_txt(image_paths, txt_path)
+    
     if not image_paths:
         raise SystemExit("No images found. Please check the images directory.")
 
     splits = split_paths(image_paths, rates=rates, seed=seed)
     save_split_txts(splits, dataset_root, add_time=add_time)
+    return splits
+
