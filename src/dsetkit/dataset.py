@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from .annotations.io import load
+from .detection import AnnotationTarget, target_from_records
 from .utils.image import get_image_paths
 from .annotations.formats import FORMAT_SUFFIXES
 
@@ -10,6 +12,32 @@ from .annotations.formats import FORMAT_SUFFIXES
 class DatasetSample:
     image_path: Path
     label_path: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetStats:
+    images: int
+    backgrounds: int
+    instances: int
+
+    @property
+    def total_images(self) -> int:
+        return self.images
+
+    @property
+    def background_images(self) -> int:
+        return self.backgrounds
+
+    @property
+    def total_instances(self) -> int:
+        return self.instances
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "images": self.images,
+            "backgrounds": self.backgrounds,
+            "instances": self.instances,
+        }
 
 
 class Dataset:
@@ -78,6 +106,53 @@ class Dataset:
         for i in range(len(self.image_paths)):
             yield self[i]
 
+    def ground_truth(self, sample: DatasetSample) -> AnnotationTarget:
+        self._assert_built()
+
+        if sample.label_path is None:
+            return AnnotationTarget.empty()
+
+        ann = load(
+            image_path=sample.image_path,
+            label_path=sample.label_path,
+            fmt=self.source_format,
+            names=self.names,
+        )
+
+        records = []
+        for item in ann.items:
+            if item.bbox is None:
+                continue
+            records.append(
+                {
+                    "bbox": [item.bbox.x1, item.bbox.y1, item.bbox.x2, item.bbox.y2],
+                    "label": item.category,
+                    "class_id": item.category_id,
+                }
+            )
+
+        return target_from_records(records, self.names)
+
+    def stats(self) -> DatasetStats:
+        self._assert_built()
+
+        backgrounds = 0
+        instances = 0
+
+        for sample in self:
+            target = self.ground_truth(sample)
+            count = len(target.cls)
+            instances += count
+
+            if count == 0:
+                backgrounds += 1
+
+        return DatasetStats(
+            images=len(self.image_paths),
+            backgrounds=backgrounds,
+            instances=instances,
+        )
+
     # -------------------------
     # safety
     # -------------------------
@@ -96,3 +171,5 @@ class Dataset:
         if not path.is_dir():
             raise ValueError(f"Invalid directory: {path}")
         return path
+
+

@@ -1,255 +1,324 @@
-import numpy as np
 from dataclasses import dataclass
+from typing import Sequence
+
+import numpy as np
+
+from .detection import EvaluationSample
 
 
-def iou(box1, box2):
-
-    xa = max(box1[0], box2[0])
-    ya = max(box1[1], box2[1])
-
-    xb = min(box1[2], box2[2])
-    yb = min(box1[3], box2[3])
-
-    inter_w = max(0.0, xb - xa)
-    inter_h = max(0.0, yb - ya)
-
-    inter = inter_w * inter_h
-
-    area1 = (
-        max(0.0, box1[2] - box1[0])
-        * max(0.0, box1[3] - box1[1])
-    )
-
-    area2 = (
-        max(0.0, box2[2] - box2[0])
-        * max(0.0, box2[3] - box2[1])
-    )
-
-    union = area1 + area2 - inter
-
-    return inter / union if union > 0 else 0.0
-
-
-def match_predictions(
-    preds_per_image,
-    gts_per_image,
-    class_id,
-    iou_threshold,
-):
-    """
-    Per-class prediction matching.
-
-    preds_per_image:
-        {image_id: ndarray(N, 6)}
-
-    gts_per_image:
-        {image_id: ndarray(M, 5)}
-    """
-
-    flat_preds = []
-
-    for image_id, preds in preds_per_image.items():
-
-        for pred in preds:
-
-            pred_class_id = int(pred[4])
-
-            if pred_class_id != class_id:
-                continue
-
-            flat_preds.append(
-                {
-                    "image_id": image_id,
-                    "bbox": pred[:4],
-                    "class_id": pred_class_id,
-                    "conf": float(pred[5]),
-                }
-            )
-
-    flat_preds.sort(
-        key=lambda x: -x["conf"]
-    )
-
-    gt_used = {}
-
-    n_gt = 0
-
-    for image_id, gts in gts_per_image.items():
-
-        class_gts = [
-            gt
-            for gt in gts
-            if int(gt[4]) == class_id
-        ]
-
-        gt_used[image_id] = [False] * len(class_gts)
-
-        n_gt += len(class_gts)
-
-    tp = np.zeros(len(flat_preds), dtype=np.float32)
-    fp = np.zeros(len(flat_preds), dtype=np.float32)
-
-    for i, pred in enumerate(flat_preds):
-
-        image_id = pred["image_id"]
-
-        gts = [
-            gt
-            for gt in gts_per_image.get(image_id, [])
-            if int(gt[4]) == class_id
-        ]
-
-        best_iou = 0.0
-        best_idx = -1
-
-        for j, gt_box in enumerate(gts):
-
-            if gt_used[image_id][j]:
-                continue
-
-            cur_iou = iou(
-                pred["bbox"],
-                gt_box[:4],
-            )
-
-            if cur_iou > best_iou:
-                best_iou = cur_iou
-                best_idx = j
-
-        if (
-            best_iou >= iou_threshold
-            and best_idx >= 0
-        ):
-
-            tp[i] = 1.0
-
-            gt_used[image_id][best_idx] = True
-
-        else:
-            fp[i] = 1.0
-
-    return tp, fp, n_gt, flat_preds
-
-
-def compute_ap_101(tp, fp, n_gt):
-
-    if n_gt == 0:
-        return 0.0, np.array([]), np.array([])
-
-    cum_tp = np.cumsum(tp)
-    cum_fp = np.cumsum(fp)
-
-    recall = cum_tp / n_gt
-
-    precision = (
-        cum_tp
-        / np.maximum(cum_tp + cum_fp, 1e-12)
-    )
-
-    mrec = np.concatenate([
-        [0.0],
-        recall,
-        [1.0],
-    ])
-
-    mpre = np.concatenate([
-        [0.0],
-        precision,
-        [0.0],
-    ])
-
-    for i in range(len(mpre) - 1, 0, -1):
-        mpre[i - 1] = max(
-            mpre[i - 1],
-            mpre[i],
-        )
-
-    ap = 0.0
-
-    for r in np.linspace(0, 1, 101):
-
-        idx = np.searchsorted(
-            mrec,
-            r,
-            side="left",
-        )
-
-        if idx < len(mpre):
-            ap += mpre[idx]
-
-    ap /= 101.0
-
-    return ap, precision, recall
-
-
-@dataclass
-class PRF1Result:
-
+@dataclass(frozen=True, slots=True)
+class ClassMetrics:
+    images: int
+    instances: int
+    precision: float
+    recall: float
+    f1: float
+    ap: float
     tp: int
     fp: int
     fn: int
 
+    def as_dict(self, ap_key: str) -> dict[str, float | int]:
+        return {
+            "images": self.images,
+            "instances": self.instances,
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1": self.f1,
+            ap_key: self.ap,
+            "tp": self.tp,
+            "fp": self.fp,
+            "fn": self.fn,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionMetrics:
+    images: int
+    instances: int
     precision: float
     recall: float
     f1: float
+    mAP: float
+    ap_key: str
+    per_class: dict[str, ClassMetrics]
+
+    def as_dict(self) -> dict:
+        return {
+            "images": self.images,
+            "instances": self.instances,
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1": self.f1,
+            "mAP": self.mAP,
+            self.ap_key: self.mAP,
+            "per_class": {
+                name: metrics.as_dict(self.ap_key)
+                for name, metrics in self.per_class.items()
+            },
+        }
 
 
-def compute_precision_recall_f1(
-    tp,
-    fp,
-    n_gt,
-):
+def normalize_iou_thresholds(iou: float | Sequence[float] | np.ndarray) -> np.ndarray:
+    thresholds = np.asarray([iou] if np.isscalar(iou) else iou, dtype=np.float32)
+    if thresholds.ndim != 1 or thresholds.size == 0:
+        raise ValueError("iou must be a float or a non-empty 1D sequence")
+    if np.any((thresholds <= 0) | (thresholds > 1)):
+        raise ValueError("iou thresholds must be in (0, 1]")
+    return thresholds
 
-    tp = int(tp)
-    fp = int(fp)
 
-    fn = int(n_gt - tp)
+def ap_key_from_iou(iouv: np.ndarray) -> str:
+    if len(iouv) == 1:
+        return f"mAP{int(round(float(iouv[0]) * 100)):02d}"
 
-    precision = (
-        tp
-        / max(tp + fp, 1e-12)
+    default = np.linspace(0.5, 0.95, 10, dtype=np.float32)
+    if len(iouv) == len(default) and np.allclose(iouv, default):
+        return "mAP50-95"
+
+    start = int(round(float(iouv.min()) * 100))
+    end = int(round(float(iouv.max()) * 100))
+    return f"mAP{start:02d}-{end:02d}"
+
+
+def box_iou(boxes1, boxes2) -> np.ndarray:
+    boxes1 = np.asarray(boxes1, dtype=np.float32)
+    boxes2 = np.asarray(boxes2, dtype=np.float32)
+
+    if boxes1.size == 0 or boxes2.size == 0:
+        return np.zeros((len(boxes1), len(boxes2)), dtype=np.float32)
+
+    lt = np.maximum(boxes1[:, None, :2], boxes2[None, :, :2])
+    rb = np.minimum(boxes1[:, None, 2:], boxes2[None, :, 2:])
+    wh = np.clip(rb - lt, 0, None)
+    inter = wh[..., 0] * wh[..., 1]
+
+    area1 = np.clip(boxes1[:, 2] - boxes1[:, 0], 0, None) * np.clip(
+        boxes1[:, 3] - boxes1[:, 1], 0, None
+    )
+    area2 = np.clip(boxes2[:, 2] - boxes2[:, 0], 0, None) * np.clip(
+        boxes2[:, 3] - boxes2[:, 1], 0, None
+    )
+    union = area1[:, None] + area2[None, :] - inter
+    return inter / np.maximum(union, 1e-16)
+
+
+def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
+    if len(y) == 0:
+        return y
+
+    nf = round(len(y) * f * 2) // 2 + 1
+    padding = np.ones(nf // 2)
+    padded = np.concatenate((padding * y[0], y, padding * y[-1]), 0)
+    return np.convolve(padded, np.ones(nf) / nf, mode="valid")
+
+
+def compute_ap(recall, precision) -> tuple[float, np.ndarray, np.ndarray]:
+    recall = np.asarray(recall)
+    precision = np.asarray(precision)
+
+    tail = recall[-1] if len(recall) else 1.0
+    mrec = np.concatenate(([0.0], recall, [tail], [1.0]))
+    mpre = np.concatenate(([1.0], precision, [0.0], [0.0]))
+    mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+
+    x = np.linspace(0, 1, 101)
+    ap = np.trapezoid(np.interp(x, mrec, mpre), x)
+    return float(ap), mpre, mrec
+
+
+def match_predictions(pred_cls, true_cls, iou, iouv) -> np.ndarray:
+    pred_cls = np.asarray(pred_cls)
+    true_cls = np.asarray(true_cls)
+    iou = np.asarray(iou)
+    iouv = np.asarray(iouv, dtype=np.float32)
+
+    correct = np.zeros((pred_cls.shape[0], iouv.shape[0]), dtype=bool)
+    if pred_cls.size == 0 or true_cls.size == 0:
+        return correct
+
+    iou = iou * (true_cls[:, None] == pred_cls[None, :])
+    for idx, threshold in enumerate(iouv):
+        matches = np.array(np.nonzero(iou >= threshold)).T
+        if matches.shape[0] == 0:
+            continue
+
+        if matches.shape[0] > 1:
+            matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
+            matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+            matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+
+        correct[matches[:, 1].astype(int), idx] = True
+
+    return correct
+
+
+def ap_per_class(tp, conf, pred_cls, target_cls, eps: float = 1e-16) -> tuple:
+    tp = np.asarray(tp, dtype=bool)
+    conf = np.asarray(conf, dtype=np.float32)
+    pred_cls = np.asarray(pred_cls)
+    target_cls = np.asarray(target_cls)
+
+    if tp.ndim == 1:
+        tp = tp[:, None]
+
+    order = np.argsort(-conf)
+    tp, conf, pred_cls = tp[order], conf[order], pred_cls[order]
+
+    unique_classes, nt = np.unique(target_cls, return_counts=True)
+    nc = unique_classes.shape[0]
+    x = np.linspace(0, 1, 1000)
+
+    ap = np.zeros((nc, tp.shape[1]))
+    p_curve = np.zeros((nc, 1000))
+    r_curve = np.zeros((nc, 1000))
+    prec_values = []
+
+    for ci, cls in enumerate(unique_classes):
+        class_mask = pred_cls == cls
+        n_labels = nt[ci]
+        n_preds = class_mask.sum()
+        if n_preds == 0 or n_labels == 0:
+            continue
+
+        fpc = (1 - tp[class_mask]).cumsum(0)
+        tpc = tp[class_mask].cumsum(0)
+
+        recall = tpc / (n_labels + eps)
+        r_curve[ci] = np.interp(-x, -conf[class_mask], recall[:, 0], left=0)
+
+        precision = tpc / (tpc + fpc)
+        p_curve[ci] = np.interp(-x, -conf[class_mask], precision[:, 0], left=1)
+
+        for j in range(tp.shape[1]):
+            ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
+            if j == 0:
+                prec_values.append(np.interp(x, mrec, mpre))
+
+    prec_values = np.array(prec_values) if prec_values else np.zeros((1, 1000))
+    f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
+
+    best_i = smooth(f1_curve.mean(0), 0.1).argmax() if nc else 0
+    p = p_curve[:, best_i] if nc else np.array([])
+    r = r_curve[:, best_i] if nc else np.array([])
+    f1 = f1_curve[:, best_i] if nc else np.array([])
+    tp_counts = (r * nt).round() if nc else np.array([])
+    fp_counts = (tp_counts / (p + eps) - tp_counts).round() if nc else np.array([])
+
+    return (
+        tp_counts,
+        fp_counts,
+        p,
+        r,
+        f1,
+        ap,
+        unique_classes.astype(int),
+        p_curve,
+        r_curve,
+        f1_curve,
+        x,
+        prec_values,
     )
 
-    recall = (
-        tp
-        / max(n_gt, 1e-12)
+
+def detection_metrics(
+    samples: list[EvaluationSample],
+    names: list[str],
+    conf_threshold: float = 0.001,
+    iou: float | Sequence[float] | np.ndarray = 0.5,
+) -> DetectionMetrics:
+    iouv = normalize_iou_thresholds(iou)
+    ap_key = ap_key_from_iou(iouv)
+
+    stats = {
+        "tp": [],
+        "conf": [],
+        "pred_cls": [],
+        "target_cls": [],
+    }
+    target_images = [set() for _ in names]
+
+    for image_idx, sample in enumerate(samples):
+        preds = sample.prediction
+        target = sample.target
+
+        pred_boxes = preds.boxes
+        pred_cls = preds.cls
+        pred_conf = preds.conf
+        if len(pred_conf):
+            keep = pred_conf >= conf_threshold
+            pred_boxes = pred_boxes[keep]
+            pred_cls = pred_cls[keep]
+            pred_conf = pred_conf[keep]
+
+        for cls in np.unique(target.cls):
+            cls = int(cls)
+            if 0 <= cls < len(names):
+                target_images[cls].add(image_idx)
+
+        if len(pred_boxes) and len(target.boxes):
+            tp = match_predictions(
+                pred_cls=pred_cls,
+                true_cls=target.cls,
+                iou=box_iou(target.boxes, pred_boxes),
+                iouv=iouv,
+            )
+        else:
+            tp = np.zeros((len(pred_boxes), len(iouv)), dtype=bool)
+
+        stats["tp"].append(tp)
+        stats["conf"].append(pred_conf.astype(np.float32, copy=False))
+        stats["pred_cls"].append(pred_cls.astype(np.int64, copy=False))
+        stats["target_cls"].append(target.cls.astype(np.int64, copy=False))
+
+    flat_stats = {
+        key: np.concatenate(value, 0) if value else np.zeros(0)
+        for key, value in stats.items()
+    }
+    if flat_stats["tp"].size == 0:
+        flat_stats["tp"] = np.zeros((0, len(iouv)), dtype=bool)
+
+    tp, fp, p, r, f1, ap, ap_class_index = ap_per_class(
+        flat_stats["tp"],
+        flat_stats["conf"],
+        flat_stats["pred_cls"],
+        flat_stats["target_cls"],
+    )[:7]
+
+    nt_per_class = np.bincount(
+        flat_stats["target_cls"].astype(int),
+        minlength=len(names),
+    )
+    nt_per_image = np.array([len(images) for images in target_images], dtype=int)
+
+    per_class = {}
+    for result_idx, class_id in enumerate(ap_class_index):
+        if class_id < 0 or class_id >= len(names):
+            continue
+
+        tp_count = int(tp[result_idx])
+        fp_count = int(fp[result_idx])
+        instances = int(nt_per_class[class_id])
+        per_class[names[class_id]] = ClassMetrics(
+            images=int(nt_per_image[class_id]),
+            instances=instances,
+            precision=float(p[result_idx]),
+            recall=float(r[result_idx]),
+            f1=float(f1[result_idx]),
+            ap=float(ap[result_idx].mean()),
+            tp=tp_count,
+            fp=fp_count,
+            fn=max(instances - tp_count, 0),
+        )
+
+    return DetectionMetrics(
+        images=len(samples),
+        instances=int(nt_per_class.sum()),
+        precision=float(p.mean()) if len(p) else 0.0,
+        recall=float(r.mean()) if len(r) else 0.0,
+        f1=float(f1.mean()) if len(f1) else 0.0,
+        mAP=float(ap.mean()) if len(ap) else 0.0,
+        ap_key=ap_key,
+        per_class=per_class,
     )
 
-    f1 = (
-        2 * precision * recall
-        / max(precision + recall, 1e-12)
-    )
-
-    return PRF1Result(
-        tp=tp,
-        fp=fp,
-        fn=fn,
-        precision=float(precision),
-        recall=float(recall),
-        f1=float(f1),
-    )
-
-
-def filter_by_conf(
-    tp,
-    fp,
-    flat_preds,
-    conf_threshold,
-):
-
-    if not len(flat_preds):
-        return 0.0, 0.0
-
-    kept = [
-        i
-        for i, pred in enumerate(flat_preds)
-        if pred["conf"] >= conf_threshold
-    ]
-
-    if not kept:
-        return 0.0, 0.0
-
-    tp_at = tp[kept].sum()
-    fp_at = fp[kept].sum()
-
-    return tp_at, fp_at

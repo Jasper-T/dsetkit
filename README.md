@@ -1,4 +1,4 @@
-# dsetkit
+﻿# dsetkit
 
 Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 
@@ -29,7 +29,7 @@ Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 | **数据集** | 按文件名 stem 自动配对图像与标签，并基于 `source_format` 过滤标签后缀 |
 | **划分与导出** | 将图像路径列表导出为 txt，并按比例随机划分 train/val/test |
 | **数据增强** | 水平/垂直翻转，90°/180°/270° 顺时针旋转（同步更新检测框） |
-| **评估** | 基于 IoU 的 TP/FP 匹配、mAP@0.5、Precision / Recall / F1（类级与整体） |
+| **评估** | 对已有预测结果计算 Ultralytics 风格检测指标：P / R / mAP@iou / F1 |
 | **图像工具** | 无需完整解码即可读取 JPEG/PNG/WebP/BMP 尺寸；自然排序遍历 |
 | **可视化** | `Plotter` 在图像上绘制检测框（依赖 OpenCV，已包含在基础安装中） |
 
@@ -37,13 +37,13 @@ Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 
 ## 安装
 
-**基础安装**（标注、数据集、增强、可视化、指标）：
+**于础安装**（标注、数据集、增强、可视化、指标）：
 
 ```bash
 pip install -e .
 ```
 
-要求 **Python ≥ 3.11**。核心依赖：`numpy`、`natsort`、`opencv-python`、`tqdm`。
+要求 **Python ≥ 3.11**。核心依赖：`numpy>=2.0`、`natsort`、`opencv-python`、`tqdm`。
 
 ---
 
@@ -51,7 +51,7 @@ pip install -e .
 
 ### 1. 加载与转换标注
 
-所有格式经内部适配器转为统一的 `Annotation`（绝对坐标 `xyxy` 的 `BBox`）。
+所有格式经内部适配器转为统一的 `Annotation`（绝已坐标 `xyxy` 的 `BBox`）。
 
 ```python
 from dsetkit.annotations.io import load, dump, convert
@@ -83,7 +83,7 @@ dump(ann, "output/label.txt", fmt="yolo")
 
 ### 2. 构建数据集索引
 
-`Dataset` 扫描图像目录，按 stem 在标签目录中查找对应标注文件，并按 `source_format` 对应后缀进行匹配（`labelme -> .json`, `voc -> .xml`, `yolo -> .txt`）。
+`Dataset` 扫描图像目录，按 stem 在标签目录中查找已应标注文件，并按 `source_format` 已应后缀进行匹配（`labelme -> .json`, `voc -> .xml`, `yolo -> .txt`）。
 
 ```python
 from dsetkit import Dataset
@@ -97,23 +97,20 @@ dataset = Dataset(
 dataset.build()
 
 print(len(dataset))
+print(dataset.stats().as_dict())  # images / backgrounds / instances
+
 for sample in dataset:
     print(sample.image_path, sample.label_path)
+    target = dataset.ground_truth(sample)
 ```
 
 ### 3. 目标检测评估
 
-继承 `Evaluator` 并实现 `_load_predictions`，即可对固定标注格式计算指标：
+将已有预测结果传给 `Evaluator`；ground truth 由 `Dataset` 读取：
 
 ```python
-from pathlib import Path
 from dsetkit import Dataset
 from dsetkit.evaluator import Evaluator
-
-class MyEvaluator(Evaluator):
-    def _load_predictions(self, image_path: Path):
-        # 返回 list[dict]，每项: bbox [x1,y1,x2,y2], label str, conf float
-        ...
 
 dataset = Dataset(
     image_dir="images/val",
@@ -123,15 +120,23 @@ dataset = Dataset(
 )
 dataset.build()
 
-metrics = MyEvaluator(dataset).evaluate(
-    conf_threshold=0.5,
-    iou_threshold=0.5,
+predictions = {
+    "image_001.jpg": [
+        {"bbox": [10, 20, 80, 120], "label": "person", "conf": 0.91},
+    ],
+}
+
+metrics = Evaluator(dataset).evaluate(
+    predictions=predictions,
+    conf_threshold=0.001,
+    iou=0.5,
     print_metrics=True,
 )
-# metrics 含 mAP、precision、recall、f1 及 per_class 明细
+# metrics 含 precision、recall、f1、mAP50 及 per_class 明细
 ```
 
-终端输出风格类似 YOLO 验证表（`Class / Instances / P / R / mAP50 / F1`）。
+`iou` 是 dsetkit 自己的评估 IoU 阈值：`iou=0.5` 计算 `mAP50`；传入 `np.linspace(0.5, 0.95, 10)` 这类序列则计算 `mAP50-95`。
+终端输出风格类似 YOLO 验证表（`Class / Images / Instances / P / R / mAPxx / F1`）。
 
 ### 4. 可视化标注
 
@@ -192,7 +197,7 @@ split_dirs(image_dir="images/train", out_dir="splits", seed=42)
 
 ### 6. 数据增强（翻转 / 旋转）
 
-对图像与标注同步增强，输出写入 `out_dir/images/` 与对应格式标签目录：
+已图像与标注同步增强，输出写入 `out_dir/images/` 与已应格式标签目录：
 
 ```python
 from dsetkit.tools import flip_dirs, rotate_dirs
@@ -242,7 +247,7 @@ Annotation
 ├── extra: dict[str, Any]
 └── items: list[AnnotationItem]
     ├── category, category_id
-    ├── bbox: BBox(x1, y1, x2, y2)   # 绝对像素，左上-右下
+    ├── bbox: BBox(x1, y1, x2, y2)   # 绝已像素，左上-右下
     └── extra / segmentation / keypoints（预留）
 ```
 
@@ -255,11 +260,11 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema、io、各格式适配器
 │   ├── augment/           # 翻转 / 旋转（图像 + 标注）
-│   ├── dataset.py         # Dataset / DatasetSample
+│   ├── dataset.py         # Dataset / DatasetSample / DatasetStats
 │   ├── split.py           # train/val/test 划分
 │   ├── tools.py           # 批量转换/可视化/增强/划分便捷入口
-│   ├── evaluator.py       # 检测评估基类
-│   ├── metrics.py         # IoU、AP、P/R/F1
+│   ├── evaluator.py       # 检测评估于类
+│   ├── metrics.py         # NumPy IoU、AP、P/R/F1
 │   ├── utils/             # 图像元信息、文件索引
 │   └── visualize/         # Plotter
 ├── examples/              # 转换示例
@@ -287,3 +292,9 @@ python -m build --wheel
 ## 许可证
 
 [MIT](pyproject.toml) · Author: Jasper Tao
+
+
+
+
+
+

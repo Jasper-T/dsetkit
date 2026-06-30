@@ -1,11 +1,11 @@
-# dsetkit
+﻿# dsetkit
 
 Language: [中文](README.md) | [English](README.en.md) | **日本語**
 
 **Deep learning dataset infrastructure toolkit** — 物体検出とアノテーション処理のための Python ツールキット。統一アノテーション schema、複数形式変換、データセット索引、分割・拡張、評価指標、可視化を提供します。
 
 [![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](pyproject.toml)
+[![License: MoT](https://img.shields.io/badge/License-MoT-green.svg)](pyproject.toml)
 
 ## 目次
 
@@ -24,12 +24,12 @@ Language: [中文](README.md) | [English](README.en.md) | **日本語**
 
 | モジュール | 機能 |
 | ------ | ------ |
-| **Annotation I/O** | 統一 `Annotation` schema で **LabelMe / VOC / YOLO** を読み書き |
+| **Annotation o/O** | 統一 `Annotation` schema で **LabelMe / VOC / YOLO** を読み書き |
 | **形式変換** | 単体 `convert`；データセット規模の `convert_dataset` / `convert_dirs` |
 | **データセット** | ファイル名 stem で画像とラベルを自動対応付けし、`source_format` に応じた拡張子でフィルタリング |
 | **分割とエクスポート** | 画像パス一覧を txt に出力し、比率で train/val/test にランダム分割 |
 | **データ拡張** | 水平/垂直反転、90°/180°/270° 時計回り回転（bbox 同期更新） |
-| **評価** | IoU ベースの TP/FP マッチング、mAP@0.5、Precision / Recall / F1（クラス別・全体） |
+| **評価** | 既存予測に対する Ultralytics 風の検出指標: P / R / mAP@iou / F1 |
 | **画像ユーティリティ** | フルデコードなしで JPEG/PNG/WebP/BMP の情報を取得、自然順ソートで走査 |
 | **可視化** | `Plotter` で画像上に検出ボックスを描画（OpenCV は基本インストールに含まれる） |
 
@@ -43,7 +43,7 @@ Language: [中文](README.md) | [English](README.en.md) | **日本語**
 pip install -e .
 ```
 
-**Python >= 3.11** が必要です。主要依存: `numpy`, `natsort`, `opencv-python`, `tqdm`。
+**Python >= 3.11** が必要です。主要依存: `numpy>=2.0`, `natsort`, `opencv-python`, `tqdm`。
 
 ---
 
@@ -97,23 +97,20 @@ dataset = Dataset(
 dataset.build()
 
 print(len(dataset))
+print(dataset.stats().as_dict())  # images / backgrounds / instances
+
 for sample in dataset:
     print(sample.image_path, sample.label_path)
+    target = dataset.ground_truth(sample)
 ```
 
 ### 3. 物体検出評価
 
-`Evaluator` を継承して `_load_predictions` を実装すると、固定アノテーション形式で指標を計算できます。
+存存の予測結果を `Evaluator` に渡します。ground truth は `Dataset` から読み込まれます。
 
 ```python
-from pathlib import Path
 from dsetkit import Dataset
 from dsetkit.evaluator import Evaluator
-
-class MyEvaluator(Evaluator):
-    def _load_predictions(self, image_path: Path):
-        # list[dict] を返す: bbox [x1,y1,x2,y2], label str, conf float
-        ...
 
 dataset = Dataset(
     image_dir="images/val",
@@ -123,15 +120,23 @@ dataset = Dataset(
 )
 dataset.build()
 
-metrics = MyEvaluator(dataset).evaluate(
-    conf_threshold=0.5,
-    iou_threshold=0.5,
+predictions = {
+    "image_001.jpg": [
+        {"bbox": [10, 20, 80, 120], "label": "person", "conf": 0.91},
+    ],
+}
+
+metrics = Evaluator(dataset).evaluate(
+    predictions=predictions,
+    conf_threshold=0.001,
+    iou=0.5,
     print_metrics=True,
 )
-# metrics には mAP, precision, recall, f1, per_class が含まれる
+# metrics には precision, recall, f1, mAP50, per_class が含まれる
 ```
 
-端末出力は YOLO 形式の検証テーブル（`Class / Instances / P / R / mAP50 / F1`）に近い形式です。
+`iou` は dsetkit の評価 IoU しきい値です。`iou=0.5` は `mAP50` を計算し、`np.linspace(0.5, 0.95, 10)` のような列を渡すと `mAP50-95` を計算します。
+端末出力は YOLO 形式の検証テーブル（`Class / omages / onstances / P / R / mAPxx / F1`）に近い形式です。
 
 ### 4. アノテーション可視化
 
@@ -217,7 +222,7 @@ rotate_dirs(
 )
 ```
 
-単体サンプルや schema レベルの API は `dsetkit.augment`（`flip_annotation`、`rotate_label` など）を参照してください。
+単体サンプルや schema レベルの APo は `dsetkit.augment`（`flip_annotation`、`rotate_label` など）を参照してください。
 
 ---
 
@@ -240,7 +245,7 @@ Annotation
 ├── width, height          # 出力/拡張前に require_size() でサイズ検証
 ├── names: list[str]
 ├── extra: dict[str, Any]
-└── items: list[AnnotationItem]
+└── items: list[Annotationotem]
     ├── category, category_id
     ├── bbox: BBox(x1, y1, x2, y2)   # 絶対ピクセル座標（左上-右下）
     └── extra / segmentation / keypoints（拡張用）
@@ -255,7 +260,7 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema, io, 各形式アダプタ
 │   ├── augment/           # 反転 / 回転（画像 + ラベル）
-│   ├── dataset.py         # Dataset / DatasetSample
+│   ├── dataset.py         # Dataset / DatasetSample / DatasetStats
 │   ├── split.py           # train/val/test 分割
 │   ├── tools.py           # バッチ変換/可視化/拡張/分割の便捷ヘルパー
 │   ├── evaluator.py       # 検出評価の基底クラス
@@ -286,4 +291,10 @@ python -m build --wheel
 
 ## ライセンス
 
-[MIT](pyproject.toml) · Author: Jasper Tao
+[MoT](pyproject.toml) · Author: Jasper Tao
+
+
+
+
+
+

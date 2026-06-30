@@ -1,4 +1,4 @@
-# Changelog
+ï»¿# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -8,6 +8,38 @@ and this project adheres to Semantic Versioning.
 ---
 
 ## [Unreleased]
+
+---
+
+## [0.4.0] - 2026-06-30
+
+### Added
+
+- Added dataset-level `Dataset.stats()` for image, background image, and instance counts.
+- Added `Dataset.ground_truth(sample)` to expose dataset annotations as evaluation-ready targets.
+- Added common evaluation data structures in `dsetkit.detection`:
+  - `AnnotationTarget`
+  - `PredictionResult`
+  - `EvaluationSample`
+- Added tests for dataset statistics and Ultralytics-style evaluator metrics.
+
+### Changed
+
+- Refactored `Evaluator` around explicit prediction inputs and dataset-provided ground truth:
+  - `Evaluator(dataset).evaluate(predictions=..., iou=...)` is now the primary API.
+  - `_load_predictions(...)` remains available only as an optional extension point for custom prediction sources.
+- Refactored `dsetkit.metrics` to operate on `EvaluationSample` objects while keeping numeric matching/AP computation in NumPy.
+- Updated evaluator metrics to follow Ultralytics-style detection matching and AP computation.
+- `Evaluator.evaluate(iou=...)` now uses dsetkit's own evaluation IoU semantics:
+  - `iou=0.5` computes `mAP50`.
+  - A sequence such as `np.linspace(0.5, 0.95, 10)` computes `mAP50-95`.
+- Updated README files for the new evaluator API, dataset statistics, and evaluation data model.
+
+### Breaking
+
+- Removed the previous subclass-first evaluator flow as the documented primary API.
+- Removed evaluator-side annotation loading/conversion responsibilities; ground truth now belongs to `Dataset`.
+- Removed old detection structure names; use `AnnotationTarget`, `PredictionResult`, and `EvaluationSample`.
 
 ---
 
@@ -34,14 +66,14 @@ and this project adheres to Semantic Versioning.
   - Schema-level: `flip_annotation`, `flip_annotation_horizontal`, `flip_annotation_vertical`, `rotate_annotation`
   - File-level: `flip_image`, `flip_label`, `rotate_image`, `rotate_label`, `rotate_sample`
 - Added `dsetkit.split` module:
-  - `split_paths(...)` â€?shuffle image paths into train/val/test buckets
-  - `save_split_txts(...)` â€?write split lists to txt files
-  - `split_tvt(...)` â€?split paths from an existing txt file
+  - `split_paths(...)` ï¿½?shuffle image paths into train/val/test buckets
+  - `save_split_txts(...)` ï¿½?write split lists to txt files
+  - `split_tvt(...)` ï¿½?split paths from an existing txt file
 - Extended `dsetkit.tools` with dataset-scale helpers:
   - `flip_dataset(...)` / `flip_dirs(...)`
   - `rotate_dataset(...)` / `rotate_dirs(...)`
-  - `export_dataset(...)` / `export_dirs(...)` â€?export image path lists to txt
-  - `split_dataset(...)` / `split_dirs(...)` â€?generate train/val/test txt splits
+  - `export_dataset(...)` / `export_dirs(...)` ï¿½?export image path lists to txt
+  - `split_dataset(...)` / `split_dirs(...)` ï¿½?generate train/val/test txt splits
 - Added `Annotation.require_size()` to validate and return `(width, height)`.
 - Added `load_txt(...)`, `save_txt(...)`, and `rm_empty_dirs(...)` in `dsetkit.utils.file`.
 - Added `resolve_image_wh(...)` in `dsetkit.utils.image` (shared by format adapters).
@@ -168,4 +200,6 @@ and this project adheres to Semantic Versioning.
 ### Breaking
 
 - N/A (initial release)
+
+
 

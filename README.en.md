@@ -1,4 +1,4 @@
-# dsetkit
+﻿# dsetkit
 
 Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 
@@ -29,7 +29,7 @@ Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 | **Dataset** | Auto-pair images and labels by filename stem, with suffix filtering driven by `source_format` |
 | **Split and Export** | Export image path lists to txt; randomly split into train/val/test by ratio |
 | **Augmentation** | Horizontal/vertical flip; 90°/180°/270° clockwise rotation with synced bboxes |
-| **Evaluation** | IoU-based TP/FP matching, mAP@0.5, Precision / Recall / F1 (per-class and overall) |
+| **Evaluation** | Ultralytics-style detection metrics over existing predictions: P / R / mAP@iou / F1 |
 | **Image Utilities** | Read JPEG/PNG/WebP/BMP metadata without full decoding; natural sorting traversal |
 | **Visualization** | `Plotter` draws detection boxes on images (OpenCV included in base install) |
 
@@ -43,7 +43,7 @@ Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 pip install -e .
 ```
 
-Requires **Python >= 3.11**. Core dependencies: `numpy`, `natsort`, `opencv-python`, `tqdm`.
+Requires **Python >= 3.11**. Core dependencies: `numpy>=2.0`, `natsort`, `opencv-python`, `tqdm`.
 
 ---
 
@@ -97,23 +97,20 @@ dataset = Dataset(
 dataset.build()
 
 print(len(dataset))
+print(dataset.stats().as_dict())  # images / backgrounds / instances
+
 for sample in dataset:
     print(sample.image_path, sample.label_path)
+    target = dataset.ground_truth(sample)
 ```
 
 ### 3. Evaluate object detection
 
-Subclass `Evaluator` and implement `_load_predictions` to compute metrics on a fixed annotation format:
+Pass existing predictions to `Evaluator`; ground truth is read from `Dataset`:
 
 ```python
-from pathlib import Path
 from dsetkit import Dataset
 from dsetkit.evaluator import Evaluator
-
-class MyEvaluator(Evaluator):
-    def _load_predictions(self, image_path: Path):
-        # return list[dict], each item: bbox [x1,y1,x2,y2], label str, conf float
-        ...
 
 dataset = Dataset(
     image_dir="images/val",
@@ -123,15 +120,23 @@ dataset = Dataset(
 )
 dataset.build()
 
-metrics = MyEvaluator(dataset).evaluate(
-    conf_threshold=0.5,
-    iou_threshold=0.5,
+predictions = {
+    "image_001.jpg": [
+        {"bbox": [10, 20, 80, 120], "label": "person", "conf": 0.91},
+    ],
+}
+
+metrics = Evaluator(dataset).evaluate(
+    predictions=predictions,
+    conf_threshold=0.001,
+    iou=0.5,
     print_metrics=True,
 )
-# metrics includes mAP, precision, recall, f1, and per_class details
+# metrics includes precision, recall, f1, mAP50, and per_class details
 ```
 
-Terminal output follows a YOLO-style validation table (`Class / Instances / P / R / mAP50 / F1`).
+`iou` is dsetkit's evaluation IoU threshold: `iou=0.5` computes `mAP50`; pass a sequence such as `np.linspace(0.5, 0.95, 10)` to compute `mAP50-95`.
+Terminal output follows a YOLO-style validation table (`Class / Images / Instances / P / R / mAPxx / F1`).
 
 ### 4. Visualize annotations
 
@@ -244,6 +249,16 @@ Annotation
     ├── category, category_id
     ├── bbox: BBox(x1, y1, x2, y2)   # absolute pixels, top-left to bottom-right
     └── extra / segmentation / keypoints (reserved)
+
+EvaluationSample
+├── image_id: str | Path
+├── prediction: PredictionResult
+│   ├── boxes: ndarray(N, 4)         # xyxy, float32
+│   ├── cls: ndarray(N,)             # int class ids
+│   └── conf: ndarray(N,)            # confidence scores
+└── target: AnnotationTarget
+    ├── boxes: ndarray(M, 4)         # xyxy, float32
+    └── cls: ndarray(M,)             # int class ids
 ```
 
 ---
@@ -255,10 +270,11 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema, io, format adapters
 │   ├── augment/           # flip / rotate (image + label)
-│   ├── dataset.py         # Dataset / DatasetSample
+│   ├── dataset.py         # Dataset / DatasetSample / DatasetStats
 │   ├── split.py           # train/val/test splitting
 │   ├── tools.py           # batch convert/plot/augment/split helpers
-│   ├── evaluator.py       # detection evaluation base class
+│   ├── detection.py       # AnnotationTarget / PredictionResult / EvaluationSample
+│   ├── evaluator.py       # prediction + ground-truth evaluation orchestration
 │   ├── metrics.py         # IoU, AP, P/R/F1
 │   ├── utils/             # image metadata, file indexing
 │   └── visualize/         # Plotter
@@ -287,3 +303,9 @@ For release history, see [CHANGELOG.md](CHANGELOG.md).
 ## License
 
 [MIT](pyproject.toml) · Author: Jasper Tao
+
+
+
+
+
+

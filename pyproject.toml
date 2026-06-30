@@ -1,6 +1,6 @@
 [project]
 name = "dsetkit"
-version = "0.3.1"
+version = "0.4.0"
 description = "Deep learning dataset infrastructure toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -11,7 +11,7 @@ authors = [
 ]
 
 dependencies = [
-    "numpy>=1.24",
+    "numpy>=2.0",
     "natsort>=8.0",
     "opencv-python>=4.8",
     "tqdm>=4.0",
@@ -23,4 +23,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+
 
