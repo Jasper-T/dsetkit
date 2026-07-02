@@ -132,11 +132,11 @@ metrics = Evaluator(dataset).evaluate(
     iou=0.5,
     print_metrics=True,
 )
-# metrics 含 precision、recall、f1、mAP50 及 per_class 明细
+# metrics 含 precision、recall、f1、mAP50、mAP50-95 及 per_class 明细
 ```
 
-`iou` 是 dsetkit 自己的评估 IoU 阈值：`iou=0.5` 计算 `mAP50`；传入 `np.linspace(0.5, 0.95, 10)` 这类序列则计算 `mAP50-95`。
-终端输出风格类似 YOLO 验证表（`Class / Images / Instances / P / R / mAPxx / F1`）。
+`iou` 是 dsetkit 自己的评估 IoU 起始阈值：`iou=0.5` 会按固定 `0.05` 步长评估 `0.50...0.95`，同时输出 `mAP50` 和 `mAP50-95`；`iou=0.25` 则输出 `mAP25` 和 `mAP25-95`。
+终端输出风格类似 YOLO 验证表（`Class / Images / Instances / P / R / mAPxx / mAPxx-95 / F1`）。
 
 ### 4. 可视化标注
 
@@ -279,11 +279,10 @@ dsetkit/
 # 可编辑安装
 pip install -e .
 
-# 构建 wheel（可先备份旧 build 目录）
-python -m build --wheel
+# 构建 wheel
+uv build --wheel
 ```
 
-清理 `__pycache__`：`scripts/clean_pycache.sh`
 
 变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -132,11 +132,11 @@ metrics = Evaluator(dataset).evaluate(
     iou=0.5,
     print_metrics=True,
 )
-# metrics includes precision, recall, f1, mAP50, and per_class details
+# metrics includes precision, recall, f1, mAP50, mAP50-95, and per_class details
 ```
 
-`iou` is dsetkit's evaluation IoU threshold: `iou=0.5` computes `mAP50`; pass a sequence such as `np.linspace(0.5, 0.95, 10)` to compute `mAP50-95`.
-Terminal output follows a YOLO-style validation table (`Class / Images / Instances / P / R / mAPxx / F1`).
+`iou` is dsetkit's starting evaluation IoU threshold: `iou=0.5` evaluates `0.50...0.95` with a fixed `0.05` step and reports both `mAP50` and `mAP50-95`; `iou=0.25` reports `mAP25` and `mAP25-95`.
+Terminal output follows a YOLO-style validation table (`Class / Images / Instances / P / R / mAPxx / mAPxx-95 / F1`).
 
 ### 4. Visualize annotations
 
@@ -291,10 +291,9 @@ dsetkit/
 pip install -e .
 
 # build wheel
-python -m build --wheel
+uv build --wheel
 ```
 
-Clean `__pycache__`: `scripts/clean_pycache.sh`
 
 For release history, see [CHANGELOG.md](CHANGELOG.md).
 

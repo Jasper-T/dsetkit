@@ -14,11 +14,12 @@ class ClassMetrics:
     recall: float
     f1: float
     ap: float
+    ap_range: float
     tp: int
     fp: int
     fn: int
 
-    def as_dict(self, ap_key: str) -> dict[str, float | int]:
+    def as_dict(self, ap_key: str, ap_range_key: str) -> dict[str, float | int]:
         return {
             "images": self.images,
             "instances": self.instances,
@@ -26,6 +27,7 @@ class ClassMetrics:
             "recall": self.recall,
             "f1": self.f1,
             ap_key: self.ap,
+            ap_range_key: self.ap_range,
             "tp": self.tp,
             "fp": self.fp,
             "fn": self.fn,
@@ -40,7 +42,9 @@ class DetectionMetrics:
     recall: float
     f1: float
     mAP: float
+    mAP_range: float
     ap_key: str
+    ap_range_key: str
     per_class: dict[str, ClassMetrics]
 
     def as_dict(self) -> dict:
@@ -50,10 +54,10 @@ class DetectionMetrics:
             "precision": self.precision,
             "recall": self.recall,
             "f1": self.f1,
-            "mAP": self.mAP,
             self.ap_key: self.mAP,
+            self.ap_range_key: self.mAP_range,
             "per_class": {
-                name: metrics.as_dict(self.ap_key)
+                name: metrics.as_dict(self.ap_key, self.ap_range_key)
                 for name, metrics in self.per_class.items()
             },
         }
@@ -68,17 +72,31 @@ def normalize_iou_thresholds(iou: float | Sequence[float] | np.ndarray) -> np.nd
     return thresholds
 
 
-def ap_key_from_iou(iouv: np.ndarray) -> str:
+def expand_iou_thresholds(iou: float | Sequence[float] | np.ndarray) -> np.ndarray:
+    thresholds = normalize_iou_thresholds(iou)
+    if len(thresholds) > 1:
+        return thresholds
+
+    start = float(thresholds[0])
+    if start >= 0.95:
+        return thresholds
+
+    return np.round(np.arange(start, 0.95 + 1e-9, 0.05), 2).astype(np.float32)
+
+
+def ap_keys_from_iou(iouv: np.ndarray) -> tuple[str, str]:
+    start = int(round(float(iouv[0]) * 100))
+    ap_key = f"mAP{start:02d}"
+
     if len(iouv) == 1:
-        return f"mAP{int(round(float(iouv[0]) * 100)):02d}"
+        return ap_key, f"{ap_key}-95"
 
     default = np.linspace(0.5, 0.95, 10, dtype=np.float32)
     if len(iouv) == len(default) and np.allclose(iouv, default):
-        return "mAP50-95"
+        return ap_key, "mAP50-95"
 
-    start = int(round(float(iouv.min()) * 100))
     end = int(round(float(iouv.max()) * 100))
-    return f"mAP{start:02d}-{end:02d}"
+    return ap_key, f"mAP{start:02d}-{end:02d}"
 
 
 def box_iou(boxes1, boxes2) -> np.ndarray:
@@ -227,8 +245,8 @@ def detection_metrics(
     conf_threshold: float = 0.001,
     iou: float | Sequence[float] | np.ndarray = 0.5,
 ) -> DetectionMetrics:
-    iouv = normalize_iou_thresholds(iou)
-    ap_key = ap_key_from_iou(iouv)
+    iouv = expand_iou_thresholds(iou)
+    ap_key, ap_range_key = ap_keys_from_iou(iouv)
 
     stats = {
         "tp": [],
@@ -305,7 +323,8 @@ def detection_metrics(
             precision=float(p[result_idx]),
             recall=float(r[result_idx]),
             f1=float(f1[result_idx]),
-            ap=float(ap[result_idx].mean()),
+            ap=float(ap[result_idx, 0]),
+            ap_range=float(ap[result_idx].mean()),
             tp=tp_count,
             fp=fp_count,
             fn=max(instances - tp_count, 0),
@@ -317,8 +336,10 @@ def detection_metrics(
         precision=float(p.mean()) if len(p) else 0.0,
         recall=float(r.mean()) if len(r) else 0.0,
         f1=float(f1.mean()) if len(f1) else 0.0,
-        mAP=float(ap.mean()) if len(ap) else 0.0,
+        mAP=float(ap[:, 0].mean()) if len(ap) else 0.0,
+        mAP_range=float(ap.mean()) if len(ap) else 0.0,
         ap_key=ap_key,
+        ap_range_key=ap_range_key,
         per_class=per_class,
     )
 

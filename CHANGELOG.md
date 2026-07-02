@@ -11,6 +11,21 @@ and this project adheres to Semantic Versioning.
 
 ---
 
+## [0.4.1] - 2026-07-02
+
+### Changed
+
+- Updated evaluator metrics to always report both the single-threshold AP column and the threshold-range AP column.
+- `Evaluator.evaluate(iou=0.5)` now evaluates `0.50...0.95` with a fixed `0.05` IoU step and reports `mAP50` plus `mAP50-95`.
+- `Evaluator.evaluate(iou=0.25)` now evaluates `0.25...0.95` with a fixed `0.05` IoU step and reports `mAP25` plus `mAP25-95`.
+- Updated the printed evaluator table to include both AP columns.
+
+### Breaking
+
+- Removed the generic `metrics["mAP"]` compatibility alias from evaluator metric dictionaries; use the explicit keys such as `mAP50` and `mAP50-95` instead.
+
+---
+
 ## [0.4.0] - 2026-06-30
 
 ### Added

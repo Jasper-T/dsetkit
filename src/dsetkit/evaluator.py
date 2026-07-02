@@ -120,11 +120,11 @@ class Evaluator:
         return prediction_from_records(list(value), self.names)
 
     def print_metrics(self, metrics):
-        ap_key = next(
+        ap_keys = [
             key
             for key in metrics
             if key.startswith("mAP") and key != "mAP"
-        )
+        ]
 
         print()
         print(
@@ -133,10 +133,10 @@ class Evaluator:
             f"{'Instances':>12}"
             f"{'P':>10}"
             f"{'R':>10}"
-            f"{ap_key:>12}"
-            f"{'F1':>10}"
+            + "".join(f"{key:>12}" for key in ap_keys)
+            + f"{'F1':>10}"
         )
-        print("-" * 79)
+        print("-" * (67 + 12 * len(ap_keys)))
 
         print(
             f"{'all':<15}"
@@ -144,8 +144,8 @@ class Evaluator:
             f"{metrics['instances']:>12}"
             f"{metrics['precision']:>10.4f}"
             f"{metrics['recall']:>10.4f}"
-            f"{metrics[ap_key]:>12.4f}"
-            f"{metrics['f1']:>10.4f}"
+            + "".join(f"{metrics[key]:>12.4f}" for key in ap_keys)
+            + f"{metrics['f1']:>10.4f}"
         )
 
         for class_name, m in metrics["per_class"].items():
@@ -155,7 +155,6 @@ class Evaluator:
                 f"{m['instances']:>12}"
                 f"{m['precision']:>10.4f}"
                 f"{m['recall']:>10.4f}"
-                f"{m[ap_key]:>12.4f}"
-                f"{m['f1']:>10.4f}"
+                + "".join(f"{m[key]:>12.4f}" for key in ap_keys)
+                + f"{m['f1']:>10.4f}"
             )
-

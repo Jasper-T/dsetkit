@@ -5,7 +5,7 @@ Language: [中文](README.md) | [English](README.en.md) | **日本語**
 **Deep learning dataset infrastructure toolkit** — 物体検出とアノテーション処理のための Python ツールキット。統一アノテーション schema、複数形式変換、データセット索引、分割・拡張、評価指標、可視化を提供します。
 
 [![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue.svg)](https://www.python.org/)
-[![License: MoT](https://img.shields.io/badge/License-MoT-green.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](pyproject.toml)
 
 ## 目次
 
@@ -132,11 +132,11 @@ metrics = Evaluator(dataset).evaluate(
     iou=0.5,
     print_metrics=True,
 )
-# metrics には precision, recall, f1, mAP50, per_class が含まれる
+# metrics には precision, recall, f1, mAP50, mAP50-95, per_class が含まれる
 ```
 
-`iou` は dsetkit の評価 IoU しきい値です。`iou=0.5` は `mAP50` を計算し、`np.linspace(0.5, 0.95, 10)` のような列を渡すと `mAP50-95` を計算します。
-端末出力は YOLO 形式の検証テーブル（`Class / omages / onstances / P / R / mAPxx / F1`）に近い形式です。
+`iou` は dsetkit の評価 IoU の開始しきい値です。`iou=0.5` は `0.50...0.95` を固定 `0.05` ステップで評価し、`mAP50` と `mAP50-95` の両方を出力します。`iou=0.25` は `mAP25` と `mAP25-95` を出力します。
+端末出力は YOLO 形式の検証テーブル（`Class / Images / Instances / P / R / mAPxx / mAPxx-95 / F1`）に近い形式です。
 
 ### 4. アノテーション可視化
 
@@ -279,11 +279,10 @@ dsetkit/
 # editable install
 pip install -e .
 
-# wheel build
-python -m build --wheel
+# wheel をビルド
+uv build --wheel
 ```
 
-`__pycache__` の削除: `scripts/clean_pycache.sh`
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
@@ -291,7 +290,7 @@ python -m build --wheel
 
 ## ライセンス
 
-[MoT](pyproject.toml) · Author: Jasper Tao
+[MIT](pyproject.toml) · Author: Jasper Tao
 
 
 

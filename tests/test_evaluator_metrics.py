@@ -7,7 +7,12 @@ import numpy as np
 
 from dsetkit import Dataset, PredictionResult, EvaluationSample, AnnotationTarget
 from dsetkit.evaluator import Evaluator
-from dsetkit.metrics import ap_per_class, detection_metrics, match_predictions
+from dsetkit.metrics import (
+    ap_per_class,
+    detection_metrics,
+    expand_iou_thresholds,
+    match_predictions,
+)
 
 
 def write_image(path: Path, width: int = 10, height: int = 10) -> None:
@@ -44,6 +49,33 @@ def one_sample(conf: float = 0.9) -> EvaluationSample:
 
 
 class TestDetectionMetrics(unittest.TestCase):
+    def test_single_iou_expands_to_95_by_fixed_005_step(self) -> None:
+        iouv = expand_iou_thresholds(0.25)
+
+        np.testing.assert_allclose(
+            iouv,
+            np.array(
+                [
+                    0.25,
+                    0.30,
+                    0.35,
+                    0.40,
+                    0.45,
+                    0.50,
+                    0.55,
+                    0.60,
+                    0.65,
+                    0.70,
+                    0.75,
+                    0.80,
+                    0.85,
+                    0.90,
+                    0.95,
+                ],
+                dtype=np.float32,
+            ),
+        )
+
     def test_detection_metrics_perfect_prediction(self) -> None:
         metrics = detection_metrics([one_sample()], names=["cat"], iou=0.5).as_dict()
 
@@ -53,6 +85,8 @@ class TestDetectionMetrics(unittest.TestCase):
         self.assertAlmostEqual(metrics["recall"], 1.0)
         self.assertAlmostEqual(metrics["f1"], 1.0)
         self.assertAlmostEqual(metrics["mAP50"], 0.995, places=6)
+        self.assertAlmostEqual(metrics["mAP50-95"], 0.995, places=6)
+        self.assertNotIn("mAP", metrics)
         self.assertEqual(metrics["per_class"]["cat"]["images"], 1)
         self.assertEqual(metrics["per_class"]["cat"]["instances"], 1)
 
@@ -68,6 +102,7 @@ class TestDetectionMetrics(unittest.TestCase):
         self.assertAlmostEqual(metrics["precision"], 0.0)
         self.assertAlmostEqual(metrics["recall"], 0.0)
         self.assertAlmostEqual(metrics["mAP50"], 0.0)
+        self.assertAlmostEqual(metrics["mAP50-95"], 0.0)
 
     def test_detection_metrics_supports_iou_sequence(self) -> None:
         metrics = detection_metrics(
@@ -76,8 +111,18 @@ class TestDetectionMetrics(unittest.TestCase):
             iou=np.linspace(0.5, 0.95, 10),
         ).as_dict()
 
+        self.assertIn("mAP50", metrics)
         self.assertIn("mAP50-95", metrics)
+        self.assertAlmostEqual(metrics["mAP50"], 0.995, places=6)
         self.assertAlmostEqual(metrics["mAP50-95"], 0.995, places=6)
+
+    def test_detection_metrics_expands_single_iou_to_95(self) -> None:
+        metrics = detection_metrics([one_sample()], names=["cat"], iou=0.25).as_dict()
+
+        self.assertIn("mAP25", metrics)
+        self.assertIn("mAP25-95", metrics)
+        self.assertAlmostEqual(metrics["mAP25"], 0.995, places=6)
+        self.assertAlmostEqual(metrics["mAP25-95"], 0.995, places=6)
 
     def test_evaluator_uses_passed_predictions_and_dataset_ground_truth(self) -> None:
         with TemporaryDirectory() as tmp_dir:
