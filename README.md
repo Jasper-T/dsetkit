@@ -27,6 +27,9 @@ Language: **中文** | [English](README.en.md) | [日本語](README.ja.md)
 | **标注 I/O** | 在统一 `Annotation` schema 下读写 **LabelMe / VOC / YOLO** |
 | **格式转换** | 单文件 `convert`；数据集级 `convert_dataset` / `convert_dirs` |
 | **数据集** | 按文件名 stem 自动配对图像与标签，并基于 `source_format` 过滤标签后缀 |
+| **数据集画像** | 区分正样本、背景图、无效图片与孤立标签，并统计各类别实例数 |
+| **数据集发现** | 按标准目录约定无副作用地发现图片目录与 LabelMe / VOC / YOLO 标注源 |
+| **Schema 检查** | 严格比较类别 ID、名称和顺序，不进行隐式重排 |
 | **划分与导出** | 将图像路径列表导出为 txt，并按比例随机划分 train/val/test |
 | **数据增强** | 水平/垂直翻转，90°/180°/270° 顺时针旋转（同步更新检测框） |
 | **评估** | 对已有预测结果计算 Ultralytics 风格检测指标：P / R / mAP@iou / F1 |
@@ -97,12 +100,52 @@ dataset = Dataset(
 dataset.build()
 
 print(len(dataset))
-print(dataset.stats().as_dict())  # images / backgrounds / instances
+
+profile = dataset.profile()
+print(profile.positive_images)    # 有至少一个有效实例的图片
+print(profile.background_images)  # 无标签或标签中没有实例的图片
+print(profile.invalid_images)     # 图片损坏或标注无法读取
+print(profile.orphan_labels)      # 没有对应图片的标签文件
+print(profile.class_instances)    # 按类别 ID 顺序排列的实例数
 
 for sample in dataset:
     print(sample.image_path, sample.label_path)
     target = dataset.ground_truth(sample)
 ```
+
+`profile()` 是数据集统计的统一入口。它使用图片头、尾部和容器长度进行轻量检查，不会完整解码全部像素；错误明细位于 `profile.errors`。
+
+### 2.1 发现数据集布局
+
+```python
+from dsetkit import discover_dataset
+
+discovery = discover_dataset("path/to/dataset")
+print(discovery.image_dir)
+print(discovery.annotation_format)
+print(discovery.label_dir)
+print(discovery.label_files)
+print(discovery.candidates)
+print(discovery.errors)
+```
+
+发现接口检查根目录下的 `images`，以及约定的标签目录：YOLO 使用 `labels`；VOC 使用 `Annotations`、`xmls` 或 `Xmls`；LabelMe 使用 `Jsons`、`labelme` 或 `Labelme`。标签文件分别按 `.txt`、`.xml`、`.json` 过滤。发现多个候选标签目录时，`annotation_format` 和 `label_dir` 为 `None`，具体候选和错误由 `candidates`、`errors` 返回，不会静默选择。
+
+### 2.2 严格比较类别 schema
+
+```python
+from dsetkit import compare_class_schemas
+
+result = compare_class_schemas(
+    ["cat", "dog"],
+    ["cat", "person"],
+    mode="strict",
+)
+print(result.compatible)   # False
+print(result.differences)  # class_id=1: dog != person
+```
+
+strict 模式要求类别数量、名称和顺序完全一致；不会自动排序、忽略大小写或建立类别 mapping。
 
 ### 3. 目标检测评估
 
@@ -260,7 +303,7 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema、io、各格式适配器
 │   ├── augment/           # 翻转 / 旋转（图像 + 标注）
-│   ├── dataset.py         # Dataset / DatasetSample / DatasetStats
+│   ├── dataset.py         # Dataset / DatasetSample / DatasetProfile
 │   ├── split.py           # train/val/test 划分
 │   ├── tools.py           # 批量转换/可视化/增强/划分便捷入口
 │   ├── evaluator.py       # 检测评估于类
@@ -291,8 +334,6 @@ uv build --wheel
 ## 许可证
 
 [MIT](pyproject.toml) · Author: Jasper Tao
-
-
 
 
 

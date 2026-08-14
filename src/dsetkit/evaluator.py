@@ -1,11 +1,10 @@
-from abc import abstractmethod
 from pathlib import Path
 from typing import Mapping
 
 from .dataset import Dataset
 from .detection import (
-    PredictionResult,
     EvaluationSample,
+    PredictionResult,
     prediction_from_records,
 )
 from .metrics import detection_metrics

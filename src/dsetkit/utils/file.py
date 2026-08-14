@@ -1,8 +1,6 @@
 import shutil
 from pathlib import Path
-from typing import Iterable, Union, Mapping
-
-from natsort import natsorted
+from typing import Iterable, Union
 
 
 def find_parent_dirs_with_subfolder(
