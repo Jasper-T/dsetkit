@@ -1,11 +1,11 @@
 from pathlib import Path
+from typing import Sequence, Tuple, Union
+
 import cv2
 import numpy as np
 
-from typing import Sequence, Tuple, Optional, Union 
-
-from ..annotations.schema import AnnotationItem, Annotation
 from ..annotations.io import load
+from ..annotations.schema import Annotation, AnnotationItem
 
 
 class Plotter:
@@ -268,12 +268,8 @@ def plot(
     plotter = Plotter(image)
     for item in anno_schema.items:
         plotter.detection_from_schema(item)
-    
+
     if save_path is not None:
         plotter.save(save_path)
-    
+
     return plotter.get()
-
-
-
-        

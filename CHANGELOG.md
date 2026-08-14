@@ -11,6 +11,29 @@ and this project adheres to Semantic Versioning.
 
 ---
 
+## [0.5.0] - 2026-08-14
+
+### Added
+
+- Added `Dataset.profile()` with positive/background/invalid image counts, orphan-label detection, per-class instance counts, and structured errors.
+- Added lightweight image validation based on headers, trailers, and container lengths without full pixel decoding.
+- Added `compare_class_schemas(..., mode="strict")` for exact class ID, name, and ordering compatibility checks.
+- Added side-effect-free `discover_dataset(...)` for conventional LabelMe, VOC, and YOLO directory layouts.
+
+### Changed
+
+- Annotation format registration now carries suffix, output directory, and discovery-directory metadata.
+- Dataset label suffix matching is now case-insensitive.
+- Dataset discovery now reserves `candidates` for ambiguous layouts and leaves top-level annotation fields unset until one source is selected.
+
+### Removed
+
+- Removed `Dataset.stats()` and `DatasetStats`; use `Dataset.profile()` as the unified dataset statistics API.
+- Removed the redundant `DatasetDiscovery.annotation_status` field; inspect the discovered paths, candidates, and errors directly.
+- Removed the legacy `FORMAT_SUFFIXES` and `FORMAT_DIRS` snapshots; format metadata now has a single registry-backed source of truth.
+
+---
+
 ## [0.4.1] - 2026-07-02
 
 ### Changed
@@ -215,6 +238,3 @@ and this project adheres to Semantic Versioning.
 ### Breaking
 
 - N/A (initial release)
-
-
-

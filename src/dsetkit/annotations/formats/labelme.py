@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from ..schema import Annotation, AnnotationItem, BBox
+from ...utils.image import resolve_image_wh
 from ..registry import register_format
-from ...utils.image  import resolve_image_wh
+from ..schema import Annotation, AnnotationItem, BBox
 
 
 def _parse_int(v):
@@ -100,8 +100,6 @@ def dump_labelme(
         if item.bbox is None:
             continue
 
-        shape_type = item.extra.get("shape_type", "rectangle")
-
         # detection-only: always export rectangle points
         points = [
             [item.bbox.x1, item.bbox.y1],
@@ -130,4 +128,7 @@ register_format(
     "labelme",
     loader=load_labelme,
     dumper=dump_labelme,
+    suffix=".json",
+    label_dir_name="labelme",
+    discovery_dir_names=("Jsons", "labelme", "Labelme"),
 )

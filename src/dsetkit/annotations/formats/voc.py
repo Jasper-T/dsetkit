@@ -1,8 +1,8 @@
 import xml.etree.ElementTree as ET
 
-from ..schema import Annotation, AnnotationItem, BBox
+from ...utils.image import resolve_image_wh
 from ..registry import register_format
-from ...utils.image  import resolve_image_wh
+from ..schema import Annotation, AnnotationItem, BBox
 
 
 def _parse_xml_int(parent, tag: str) -> int | None:
@@ -169,4 +169,7 @@ register_format(
     "voc",
     loader=load_voc,
     dumper=dump_voc,
+    suffix=".xml",
+    label_dir_name="xmls",
+    discovery_dir_names=("Annotations", "xmls", "Xmls"),
 )

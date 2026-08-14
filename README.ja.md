@@ -27,6 +27,9 @@ Language: [中文](README.md) | [English](README.en.md) | **日本語**
 | **Annotation o/O** | 統一 `Annotation` schema で **LabelMe / VOC / YOLO** を読み書き |
 | **形式変換** | 単体 `convert`；データセット規模の `convert_dataset` / `convert_dirs` |
 | **データセット** | ファイル名 stem で画像とラベルを自動対応付けし、`source_format` に応じた拡張子でフィルタリング |
+| **データセットプロファイル** | 正例・背景・無効画像、孤立ラベル、クラス別インスタンス数を集計 |
+| **データセット検出** | 標準的な画像および LabelMe / VOC / YOLO ラベルディレクトリを副作用なしで検出 |
+| **Schema チェック** | クラス ID・名称・順序を暗黙の並べ替えなしで厳密比較 |
 | **分割とエクスポート** | 画像パス一覧を txt に出力し、比率で train/val/test にランダム分割 |
 | **データ拡張** | 水平/垂直反転、90°/180°/270° 時計回り回転（bbox 同期更新） |
 | **評価** | 既存予測に対する Ultralytics 風の検出指標: P / R / mAP@iou / F1 |
@@ -97,12 +100,46 @@ dataset = Dataset(
 dataset.build()
 
 print(len(dataset))
-print(dataset.stats().as_dict())  # images / backgrounds / instances
+print(dataset.profile().as_dict())
 
 for sample in dataset:
     print(sample.image_path, sample.label_path)
     target = dataset.ground_truth(sample)
 ```
+
+`profile()` はデータセット統計の統一 API です。全画素をデコードせず、ヘッダーとコンテナ情報で画像を軽量検証し、診断内容を `profile.errors` に返します。
+
+#### 2.1 データセットレイアウトの検出
+
+```python
+from dsetkit import discover_dataset
+
+discovery = discover_dataset("path/to/dataset")
+print(discovery.image_dir)
+print(discovery.annotation_format)
+print(discovery.label_dir)
+print(discovery.label_files)
+print(discovery.candidates)
+print(discovery.errors)
+```
+
+検出対象は `images` と標準的なラベルディレクトリです。YOLO は `labels`、VOC は `Annotations`、`xmls`、`Xmls`、LabelMe は `Jsons`、`labelme`、`Labelme` を使用します。ファイルはそれぞれ `.txt`、`.xml`、`.json` で絞り込みます。複数の候補が見つかった場合、トップレベルの選択済みアノテーション項目は `None` のままとなり、詳細は `candidates` と `errors` に返されます。
+
+#### 2.2 クラス schema の厳密比較
+
+```python
+from dsetkit import compare_class_schemas
+
+result = compare_class_schemas(
+    ["cat", "dog"],
+    ["cat", "person"],
+    mode="strict",
+)
+print(result.compatible)   # False
+print(result.differences)  # class_id=1: dog != person
+```
+
+strict モードではクラス数、名称、順序が完全に一致する必要があります。自動ソート、大文字小文字の無視、暗黙の mapping は行いません。
 
 ### 3. 物体検出評価
 
@@ -260,7 +297,7 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema, io, 各形式アダプタ
 │   ├── augment/           # 反転 / 回転（画像 + ラベル）
-│   ├── dataset.py         # Dataset / DatasetSample / DatasetStats
+│   ├── dataset.py         # Dataset / DatasetSample / DatasetProfile
 │   ├── split.py           # train/val/test 分割
 │   ├── tools.py           # バッチ変換/可視化/拡張/分割の便捷ヘルパー
 │   ├── evaluator.py       # 検出評価の基底クラス
@@ -291,9 +328,6 @@ uv build --wheel
 ## ライセンス
 
 [MIT](pyproject.toml) · Author: Jasper Tao
-
-
-
 
 
 

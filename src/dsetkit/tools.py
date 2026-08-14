@@ -4,8 +4,10 @@ from typing import Sequence
 from tqdm import tqdm
 
 from .annotations.io import (
-    FORMAT_DIRS,
     convert as convert_annotation,
+)
+from .annotations.io import (
+    get_label_dir_name,
 )
 from .augment.flip import FlipDirection, _validate_direction, flip_image, flip_label
 from .augment.rotate import RotateAngle, _validate_angle, rotate_image, rotate_label
@@ -112,7 +114,7 @@ def flip_dataset(
 
     out_img_dir = Path(out_dir) / "images"
     out_label_dir = (
-        Path(out_dir) / FORMAT_DIRS[source_format]
+        Path(out_dir) / get_label_dir_name(source_format)
         if dataset.label_dir is not None
         else None
     )
@@ -175,7 +177,7 @@ def rotate_dataset(
 
     out_img_dir = Path(out_dir) / "images"
     out_label_dir = (
-        Path(out_dir) / FORMAT_DIRS[source_format]
+        Path(out_dir) / get_label_dir_name(source_format)
         if dataset.label_dir is not None
         else None
     )

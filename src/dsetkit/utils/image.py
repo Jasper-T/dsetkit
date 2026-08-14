@@ -1,13 +1,11 @@
-import struct
 import base64
-
+import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Final
 
 from natsort import natsorted
-
 
 JPEG_SOF_MARKERS: Final[set[int]] = { 
     0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF
@@ -38,6 +36,14 @@ class ImageInfo:
             self.width,
             self.channels,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ImageValidationResult:
+    valid: bool
+    info: ImageInfo | None = None
+    error_kind: str | None = None
+    message: str | None = None
 
 
 _READERS: Final[
@@ -75,6 +81,60 @@ def read_image_info(
         )
 
     return reader(path)
+
+
+def validate_image(path: str | Path) -> ImageValidationResult:
+    """Validate basic image structure using headers and container metadata only."""
+    path = Path(path)
+    try:
+        info = read_image_info(path)
+        if info.width <= 0 or info.height <= 0:
+            raise ValueError(f"Invalid image dimensions: {path}")
+        _validate_image_container(path)
+    except (OSError, ValueError, struct.error) as exc:
+        return ImageValidationResult(
+            valid=False,
+            error_kind="invalid_image",
+            message=str(exc),
+        )
+    return ImageValidationResult(valid=True, info=info)
+
+
+def _validate_image_container(path: Path) -> None:
+    suffix = path.suffix.lower()
+    file_size = path.stat().st_size
+    if suffix in {".jpg", ".jpeg"}:
+        with path.open("rb") as file:
+            file.seek(max(0, file_size - 64))
+            if b"\xff\xd9" not in file.read():
+                raise ValueError(f"Incomplete JPEG image: {path}")
+        return
+
+    if suffix == ".png":
+        if file_size < 12:
+            raise ValueError(f"Incomplete PNG image: {path}")
+        with path.open("rb") as file:
+            file.seek(-12, 2)
+            trailer = file.read(12)
+        if trailer[:8] != b"\x00\x00\x00\x00IEND":
+            raise ValueError(f"Incomplete PNG image: {path}")
+        return
+
+    if suffix == ".webp":
+        with path.open("rb") as file:
+            header = file.read(12)
+        declared_size = int.from_bytes(header[4:8], "little") + 8
+        if declared_size > file_size:
+            raise ValueError(f"Incomplete WebP image: {path}")
+        return
+
+    if suffix == ".bmp":
+        with path.open("rb") as file:
+            header = file.read(14)
+        declared_size = int.from_bytes(header[2:6], "little")
+        pixel_offset = int.from_bytes(header[10:14], "little")
+        if declared_size > file_size or pixel_offset >= file_size:
+            raise ValueError(f"Incomplete BMP image: {path}")
 
 
 def resolve_image_wh(image_path, width, height):
@@ -290,24 +350,22 @@ def _read_webp_info(
 
     chunk = header[12:16]
 
-    if chunk != b"VP8X":
-        raise ValueError(
-            f"Unsupported WebP format: {path}"
-        )
-
-    width = (
-        int.from_bytes(
-            header[24:27],
-            "little",
-        ) + 1
-    )
-
-    height = (
-        int.from_bytes(
-            header[27:30],
-            "little",
-        ) + 1
-    )
+    if chunk == b"VP8X":
+        width = int.from_bytes(header[24:27], "little") + 1
+        height = int.from_bytes(header[27:30], "little") + 1
+    elif chunk == b"VP8 ":
+        if header[23:26] != b"\x9d\x01\x2a":
+            raise ValueError(f"Invalid lossy WebP image: {path}")
+        width = int.from_bytes(header[26:28], "little") & 0x3FFF
+        height = int.from_bytes(header[28:30], "little") & 0x3FFF
+    elif chunk == b"VP8L":
+        if header[20] != 0x2F:
+            raise ValueError(f"Invalid lossless WebP image: {path}")
+        bits = int.from_bytes(header[21:25], "little")
+        width = (bits & 0x3FFF) + 1
+        height = ((bits >> 14) & 0x3FFF) + 1
+    else:
+        raise ValueError(f"Unsupported WebP format: {path}")
 
     return ImageInfo(
         width=width,

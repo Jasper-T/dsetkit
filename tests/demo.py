@@ -1,9 +1,9 @@
-import cv2
 from pathlib import Path
 
-from dsetkit.annotations.io import load, dump, convert
-from dsetkit.visualize.plot import Plotter
+import cv2
 
+from dsetkit.annotations.io import convert, load
+from dsetkit.visualize.plot import Plotter
 
 input_dir = Path("examples")
 output_dir = Path("examples")
@@ -85,4 +85,3 @@ for item in ann.items:
     plotter.detection_from_schema(item)
 
 plotter.save(output_dir / f"{fmt}.jpg")
-

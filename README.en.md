@@ -27,6 +27,9 @@ Language: [中文](README.md) | **English** | [日本語](README.ja.md)
 | **Annotation I/O** | Read/write **LabelMe / VOC / YOLO** with a unified `Annotation` schema |
 | **Format Conversion** | Single-file `convert`; dataset-scale `convert_dataset` / `convert_dirs` |
 | **Dataset** | Auto-pair images and labels by filename stem, with suffix filtering driven by `source_format` |
+| **Dataset Profiling** | Count positive, background, and invalid images, orphan labels, and per-class instances |
+| **Dataset Discovery** | Discover conventional image and LabelMe / VOC / YOLO annotation directories without side effects |
+| **Schema Checks** | Strictly compare class IDs, names, and ordering without implicit remapping |
 | **Split and Export** | Export image path lists to txt; randomly split into train/val/test by ratio |
 | **Augmentation** | Horizontal/vertical flip; 90°/180°/270° clockwise rotation with synced bboxes |
 | **Evaluation** | Ultralytics-style detection metrics over existing predictions: P / R / mAP@iou / F1 |
@@ -97,12 +100,46 @@ dataset = Dataset(
 dataset.build()
 
 print(len(dataset))
-print(dataset.stats().as_dict())  # images / backgrounds / instances
+print(dataset.profile().as_dict())
 
 for sample in dataset:
     print(sample.image_path, sample.label_path)
     target = dataset.ground_truth(sample)
 ```
+
+`profile()` is the unified dataset statistics API. It performs lightweight header/container validation without fully decoding image pixels; structured diagnostics are available in `profile.errors`.
+
+#### 2.1 Discover a dataset layout
+
+```python
+from dsetkit import discover_dataset
+
+discovery = discover_dataset("path/to/dataset")
+print(discovery.image_dir)
+print(discovery.annotation_format)
+print(discovery.label_dir)
+print(discovery.label_files)
+print(discovery.candidates)
+print(discovery.errors)
+```
+
+Discovery checks `images` plus conventional annotation directories: `labels` for YOLO; `Annotations`, `xmls`, or `Xmls` for VOC; and `Jsons`, `labelme`, or `Labelme` for LabelMe. Files are filtered by `.txt`, `.xml`, or `.json`. When several annotation directories match, the selected top-level annotation fields remain `None`; inspect `candidates` and `errors` instead.
+
+#### 2.2 Compare class schemas strictly
+
+```python
+from dsetkit import compare_class_schemas
+
+result = compare_class_schemas(
+    ["cat", "dog"],
+    ["cat", "person"],
+    mode="strict",
+)
+print(result.compatible)   # False
+print(result.differences)  # class_id=1: dog != person
+```
+
+Strict mode requires identical class counts, names, and ordering. It never sorts classes, ignores case, or creates an implicit mapping.
 
 ### 3. Evaluate object detection
 
@@ -270,7 +307,7 @@ dsetkit/
 ├── src/dsetkit/
 │   ├── annotations/       # schema, io, format adapters
 │   ├── augment/           # flip / rotate (image + label)
-│   ├── dataset.py         # Dataset / DatasetSample / DatasetStats
+│   ├── dataset.py         # Dataset / DatasetSample / DatasetProfile
 │   ├── split.py           # train/val/test splitting
 │   ├── tools.py           # batch convert/plot/augment/split helpers
 │   ├── detection.py       # AnnotationTarget / PredictionResult / EvaluationSample
@@ -302,9 +339,6 @@ For release history, see [CHANGELOG.md](CHANGELOG.md).
 ## License
 
 [MIT](pyproject.toml) · Author: Jasper Tao
-
-
-
 
 
 

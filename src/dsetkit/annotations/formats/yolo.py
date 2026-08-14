@@ -1,6 +1,6 @@
-from ..schema import Annotation, AnnotationItem, BBox
+from ...utils.image import resolve_image_wh
 from ..registry import register_format
-from ...utils.image  import resolve_image_wh
+from ..schema import Annotation, AnnotationItem, BBox
 
 
 def load_yolo(
@@ -90,4 +90,7 @@ register_format(
     "yolo",
     loader=load_yolo,
     dumper=dump_yolo,
+    suffix=".txt",
+    label_dir_name="labels",
+    discovery_dir_names=("labels",),
 )

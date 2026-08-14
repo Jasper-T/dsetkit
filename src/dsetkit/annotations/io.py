@@ -1,32 +1,25 @@
 from pathlib import Path
 
-from .registry import get_dumper, get_loader
-from .formats import FORMAT_SUFFIXES
-from .schema import Annotation
 from ..utils.file import ensure_dir
 
 # trigger adapter registration
 from . import formats  # noqa: F401
+from .registry import get_dumper, get_format_spec, get_loader
+from .schema import Annotation
 
-
-FORMAT_DIRS = {
-    "labelme": "labelme",
-    "voc": "xmls",
-    "yolo": "labels",
-}
 
 def get_label_dir_name(fmt: str) -> str:
-    name = FORMAT_DIRS.get(fmt)
-    if name is None:
-        raise ValueError(f"Unknown format: {fmt}")
-    return name
+    try:
+        return get_format_spec(fmt).label_dir_name
+    except ValueError as exc:
+        raise ValueError(f"Unknown format: {fmt}") from exc
 
 
 def get_label_file_suffix(fmt: str) -> str:
-    suffix = FORMAT_SUFFIXES.get(fmt)
-    if suffix is None:
-        raise ValueError(f"Unknown format: {fmt}")
-    return suffix
+    try:
+        return get_format_spec(fmt).suffix
+    except ValueError as exc:
+        raise ValueError(f"Unknown format: {fmt}") from exc
 
 
 def new_label_path(old_path: str, label_dir: str, fmt: str) -> str:
@@ -145,4 +138,3 @@ def convert(
     dump(ann, out_path, fmt=target_format)
 
     return out_path
-
