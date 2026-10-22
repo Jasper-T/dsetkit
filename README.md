@@ -513,6 +513,8 @@ Profile 是不可变结果，没有检查或 val 方法。检查入口仅在 Dat
 
 两种 Profile 均提供 `export()`／对应类型的 `from_json()`。集合使用 `DatasetCollectionProfile.from_json(text)` 恢复，再通过 `DatasetCollection(restored)` 继续重排。JSON 结构版本为 2，不兼容旧结构；来源事实只保存一份，集合额外保存成员与新增排除，完整恢复累计错误池。`as_dict()` 仅为统计摘要。
 
+`Dataset.from_profile(source_profile)` 可从已有或 JSON 恢复的单来源 `DatasetProfile` 恢复扫描器；创建时不读取文件、扫描目录或重新解析标签，`profile()` 初始返回传入的同一结果。之后可调用 `check_annotations()` 检查缓存标注，或调用 `check_images()` 读取并检查已知图片；检查只替换该扫描器的当前结果，旧 Profile、其他扫描器及已有错误保持不变。显式调用 `build()` 才会按保存的来源和检查选项重新扫描。该入口不接受集合 Profile。
+
 旧 `export_scan/from_scan`、`DatasetView`、`DatasetProfile.combine()` 及 Profile／Collection 检查接口已删除，不提供旧兼容层。
 
 `names` 可省略。VOC／LabelMe 从可处理样本中按名称首次出现的顺序生成有序类别表。

@@ -383,6 +383,9 @@ YOLO が関わる変換には完全な最終名称マッピングが必要です
 
 Dataset.check_images() は呼び出し側が選んだ時点で画像を検査し、Dataset.check_annotations() はキャッシュ済み注釈を検査します。現在の Profile を置き換え、以前の結果は変更しません。Profile と Collection に検査メソッドはありません。
 両 Profile 型が export()/from_json() を提供します。集合は DatasetCollectionProfile.from_json(text) で復元し、DatasetCollection(restored) で再分割を続けられます。JSON 構造バージョンは 2 で旧形式の互換層はありません。ソースのキャッシュと集合の追加除外から完全な累積除外をオフラインで復元します。
+
+`Dataset.from_profile(source_profile)` は既存または JSON から復元した単一ソースの DatasetProfile から走査インスタンスを再開します。生成時にファイル読込、ディレクトリ走査、注釈の再解析は行わず、profile() は最初に渡された結果そのものを返します。check_annotations() はキャッシュ済み注釈を検査し、check_images() は既知の画像を読み込んで検査します。現在の結果だけを置き換え、以前の Profile、別インスタンスと既存エラーを保持します。明示的な build() は保存済みソースと検査オプションで再走査します。集合 Profile は受け付けません。
+
 `profile.as_dict()` は統計のみを返します。変換・可視化・エクスポートは Profile を直接受け取ります。評価では呼び出し側が GT を取り出して独立した Evaluator に渡すか、データセットの `val()` を使います。
 元データは走査後不変と仮定し、明示的な build で再走査します。
 シンボリックリンク、特殊ファイル、改行を含むパスは拒否します。

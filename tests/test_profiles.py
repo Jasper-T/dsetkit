@@ -21,6 +21,60 @@ def forbidden(*args, **kwargs):
 
 
 @pytest.mark.parametrize("fmt", ["yolo", "voc", "labelme"])
+def test_scanner_resumes_saved_profile_without_reparsing_or_changing_history(tmp_path, fmt):
+    original = make_profile(tmp_path / "source", fmt, names=["dog", "cat"])
+    payload = original.export()
+    with (
+        patch("pathlib.Path.stat", forbidden),
+        patch("pathlib.Path.resolve", forbidden),
+        patch("dsetkit.dataset.load", forbidden),
+        patch("dsetkit.dataset.validate_image", forbidden),
+        patch("dsetkit.dataset.validate_annotation", forbidden),
+    ):
+        restored = DatasetProfile.from_json(payload)
+        scanner = Dataset.from_profile(restored)
+        other = Dataset.from_profile(restored)
+        assert scanner.profile() is restored
+    with (
+        patch("dsetkit.dataset.load", forbidden),
+        patch.object(Dataset, "build", forbidden),
+        patch("dsetkit.dataset.validate_source_tree", forbidden),
+    ):
+        checked = scanner.check_images()
+    assert checked.images_checked and checked.images == original.images
+    assert checked.requested_names == original.requested_names
+    assert checked.annotations_checked == original.annotations_checked
+    assert checked.source_format == fmt
+    assert original.export() == restored.export() == other.profile().export() == payload
+    assert not other.profile().images_checked
+    # A later failed check must not replace even the resumed scanner's last result.
+    with patch("dsetkit.dataset.validate_image", side_effect=RuntimeError("image adapter failed")):
+        with pytest.raises(RuntimeError, match="image adapter failed"):
+            scanner.check_images()
+    assert scanner.profile() is checked
+    assert restored.export() == payload
+
+
+def test_scanner_from_profile_rejects_collection_and_non_profiles():
+    for value in (None, {}, DatasetCollectionProfile()):
+        with pytest.raises(TypeError, match="single-source DatasetProfile"):
+            Dataset.from_profile(value)
+
+
+def test_resumed_scanner_can_explicitly_rebuild_and_preserves_check_options(tmp_path):
+    original = make_profile(tmp_path / "source")
+    scanner = scanner_for(original)
+    scanner.build()
+    checked = scanner.check_images()
+    resumed = Dataset.from_profile(DatasetProfile.from_json(checked.export()))
+    (original.label_dir / "sample.txt").write_text("")
+    updated = resumed.build().profile()
+    assert updated.images_checked and updated.annotations_checked
+    assert updated.instances == 0 and updated.background_images == 1
+    assert checked.instances == 2
+
+
+@pytest.mark.parametrize("fmt", ["yolo", "voc", "labelme"])
 def test_profile_is_complete_and_json_restore_does_not_access_sources(tmp_path, fmt):
     dataset = make_profile(tmp_path / "source", fmt, names=["dog", "cat"])
     dataset = scanner_for(dataset).build().check_images()
@@ -309,12 +363,12 @@ def test_removed_scan_and_processing_compatibility_interfaces(tmp_path):
         for name in (
             "export_scan",
             "from_scan",
-            "from_profile",
             "annotation",
             "ground_truth",
             "source_dataset",
         ):
             assert not hasattr(scanner_type, name)
+    assert not hasattr(DatasetCollection, "from_profile")
     scanner = scanner_for(make_profile(tmp_path)).build()
     for operation in (
         lambda: convert_dataset(scanner, "voc"),

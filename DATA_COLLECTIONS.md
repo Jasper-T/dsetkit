@@ -177,6 +177,26 @@ A restored result supports statistics, splits and val() offline; conversion or p
 still needs image access when dimensions or pixels are unavailable. as_dict() is only
 a statistics summary, including per-partition summaries for collections.
 
+To resume source checks, pass an existing or JSON-restored single-source result to
+`Dataset.from_profile(profile)`. Creation performs no file reads, discovery, label
+parsing or checks; the scanner's initial profile() is the supplied immutable object.
+check_annotations() audits cached annotations, while check_images() reads known
+image paths. Checks replace only that scanner's result, preserve existing errors
+and leave the supplied Profile and other scanners unchanged. An explicit build()
+rescans the saved source using its check options. Collection Profiles are rejected;
+use DatasetCollection(restored_collection_profile) to resume collection operations.
+
+```python
+from dsetkit import Dataset, DatasetProfile
+
+source = collection.profile().sources[0]
+restored_source = DatasetProfile.from_json(source.export())
+scanner = Dataset.from_profile(restored_source)  # No source I/O during creation.
+checked = scanner.check_images()  # Reads images, reuses cached labels.
+assert scanner.profile() is checked
+assert restored_source is not checked
+```
+
 ## Component responsibilities and independent use
 
 Components are independently callable through explicit input/result contracts.

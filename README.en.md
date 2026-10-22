@@ -405,6 +405,9 @@ an annotation directory has format None.
 
 Dataset.check_images() checks known images when the caller chooses; Dataset.check_annotations() checks cached labels. Both update the scanner's current Profile and leave old results unchanged. Profile and Collection have no check methods.
 Both Profile types provide export()/from_json(); restore collections with DatasetCollectionProfile.from_json(text), then DatasetCollection(restored) to continue splitting. JSON schema version 2 has no legacy reader. Restoration reads no source files; source caches are stored once, and collection additions preserve the full exclusion history.
+
+`Dataset.from_profile(source_profile)` resumes a scanner from an existing or JSON-restored single-source DatasetProfile. Creation performs no file reads, directory scans or label parsing, and profile() initially returns the supplied result itself. Call check_annotations() to audit cached annotations or check_images() to read and check known images. Checks replace only this scanner's current result; previous Profiles, other scanners and existing errors are preserved. An explicit build() rescans using the saved source and check options. Collection Profiles are not accepted.
+
 `profile.as_dict()` returns statistics only. Conversion, plotting and export accept a Profile directly. Callers can extract GT for the independent Evaluator or use dataset.val().
 Iteration, counts and processing reuse this membership and cached annotations;
 pixel-based operations may still read the target image. Errors never become backgrounds.

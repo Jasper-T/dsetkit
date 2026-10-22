@@ -61,6 +61,16 @@ class Dataset:
         )
         self._built = False
 
+    @classmethod
+    def from_profile(cls, profile: DatasetProfile) -> Dataset:
+        """Resume checks from immutable source facts without accessing source files."""
+        if not isinstance(profile, DatasetProfile):
+            raise TypeError("Expected a single-source DatasetProfile")
+        dataset = cls.__new__(cls)
+        dataset._profile = profile
+        dataset._built = True
+        return dataset
+
     def build(self) -> Dataset:
         self._built = False
         previous = self._profile
