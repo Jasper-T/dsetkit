@@ -3,6 +3,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
 
@@ -10,8 +12,43 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Verify Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install verification tools
+        run: python -m pip install --upgrade build twine pytest pytest-subtests ruff
+
+      - name: Build and validate distributions
+        run: |
+          python -B -m build
+          python -B -m twine check dist/*
+          python -B -m pip install dist/*.whl
+
+      - name: Run tests against the installed wheel
+        run: python -B -m pytest -q -p no:cacheprovider
+
+      - name: Check source and tests
+        run: python -B -m ruff check --isolated --no-cache --select E4,E7,E9,F src tests
+
   build-and-release:
     name: Build and upload release assets
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     steps:
@@ -35,9 +72,29 @@ jobs:
       - name: Validate distributions
         run: python -m twine check dist/*
 
+      - name: Extract version release notes
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          if project["project"]["version"] != version:
+              raise SystemExit("Release tag must match the package version")
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8-sig")
+          section = changelog.split(f"## [{version}] - ", 1)[1]
+          notes = section.split("\n", 1)[1].split("\n---\n", 1)[0].strip()
+          Path(os.environ["RUNNER_TEMP"], "release-notes.md").write_text(
+              notes + "\n", encoding="utf-8"
+          )
+          PY
+
       - name: Create or update GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
+          body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: true
           files: |
             dist/*.whl

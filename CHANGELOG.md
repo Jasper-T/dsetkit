@@ -11,6 +11,54 @@ and this project adheres to Semantic Versioning.
 
 ---
 
+## [0.6.0] - 2026-10-22
+
+### Changed
+
+- Separate single-source DatasetProfile from DatasetCollectionProfile. Collection construction accepts Profiles, keeps sample-level partition membership and reports overall/partition statistics.
+- Add DatasetCollection.split(rates, seed=22): pool current effective members, permanently exclude every stem conflict before allocation, and return a new snapshot sharing source facts. Exclusions never revive after repartitioning or restoration.
+- Keep default scans annotation-only. Checks belong to Dataset; processing tools read missing image dimensions directly on demand and do not retain Dataset instances.
+- Dataset/Collection val() uses normalized xyxy for YOLO GT and pixel xyxy for VOC/LabelMe; it performs no image or label I/O, independently of cached dimensions.
+- Persist both Profile types with schema version 2. Collection serialization stores source facts once, sample membership and additional permanent exclusions; restoration derives statistics offline without legacy-schema compatibility.
+
+- Add `Dataset.val(predictions)` and `DatasetCollection.val(predictions)` as cached-GT adapters to the pure Evaluator. IDs are stems qualified by split/source when needed; Profile has no val() method.
+
+- Classify all duplicate-stem images within a directory or partition as image errors during Profile construction; preserve valid same-name images across different partitions. Raw inventories retain all supported images.
+- `Evaluator` now accepts explicit prediction and GT mappings keyed by opaque nonblank string `sample_id`. GT defines the population; missing predictions are empty and unknown prediction IDs are errors. Explicit empty GT samples retain false positives.
+
+- `DatasetProfile` now owns source descriptions, raw/processable/error samples, cached annotations, image sizes, check results and derived statistics. Dataset checks replace its current Profile and return the new result; Profiles are immutable and provide no checks.
+- Conversion, plotting and export now consume `DatasetProfile` or `DatasetCollectionProfile`. Obtain it from `open_dataset(...).profile()` or `Dataset(...).build().profile()`. Evaluator is independent of Profile; callers may extract cached GT explicitly.
+- Serialize complete results with `profile.export()` and restore with the matching `DatasetProfile.from_json(text)` or `DatasetCollectionProfile.from_json(text)` without reading source files or repeating content checks. `as_dict()` returns statistics only.
+- Separate scanning (`dataset.py`), analysis results (`profile.py`), JSON structure (`_profile_io.py`) and detection validation (`annotations/validation.py`).
+
+### Fixed
+
+- Detect source image stem conflicts before reading labels or inspecting images; later checks skip path-conflicting samples and JSON restoration preserves their exclusions.
+- Prefer actual image dimensions over annotation size metadata for validation and pixel annotations. Batch processing and single-file reads with an image path use image dimensions without changing source Profile caches.
+- Require string LabelMe `imagePath` values and reject non-finite or overflowing numbers in restored Profile JSON. Source and sample paths in saved Profiles must be absolute.
+- Sort and deduplicate validated IoU thresholds in `metrics` before AP calculation; emit accurate keys for single high thresholds.
+- Include Markdown documentation and metric reference JSON fixtures in source distributions.
+- Correct class mappings and output-directory examples in all README translations.
+
+- Reject identical source/target annotation formats before conversion writes, and reject text merge outputs that refer to an input file.
+- Share final class mapping validation across single-file and dataset conversions involving YOLO, including reordered named classes and explicit empty names.
+- Record malformed annotation data per sample while propagating adapter and validation programming errors.
+- Honor explicit empty visualization names, validate nonempty mappings, and raise when OpenCV cannot save an image.
+- Match predictions in descending confidence order; verify matching and AP against Ultralytics 8.4.183 (`1da023f708beb274db82c2c04b034c1859ab3fba`).
+- Preserve class array dtypes, reject invalid fractional IDs, and evaluate numeric class IDs without requiring names. Add `per_class_by_id` without changing named `per_class` keys.
+
+### Removed
+
+- Remove DatasetProfile.combine(), Profile/Collection check methods, collection flags on source Profiles and Dataset-instance input to Collection. No compatibility wrappers are provided.
+
+- Removed Evaluator Profile input, prediction file loading hooks, path interpretation and terminal printing. `EvaluationSample.sample_id: str` replaces `image_id`; no compatibility wrappers are provided.
+
+- Removed `DatasetView`, `export_scan/from_scan`, and scanner processing forwarding methods. Legacy scan dictionaries require consumer-side migration; no compatibility restoration layer is provided.
+
+- Removed image augmentation: `dsetkit.augment` (including schema- and file-level flip/rotation helpers) and `dsetkit.tools.flip_dataset`, `flip_dirs`, `rotate_dataset`, and `rotate_dirs`. These APIs have no compatibility wrappers.
+
+---
+
 ## [0.5.0] - 2026-08-14
 
 ### Added
@@ -225,7 +273,7 @@ and this project adheres to Semantic Versioning.
 - Optional visualization module:
   - `Plotter` for drawing detection annotations on images
   - OpenCV integration via optional dependency.
-- Example/demo assets and scripts in `examples/` and `tests/`.
+- Initial example assets and demo scripts.
 
 ### Changed
 
