@@ -48,12 +48,14 @@ def register_format(
 
 
 def get_loader(name: str):
+    name = name.lower()
     if name not in LOADERS:
         raise ValueError(f"Unknown format: {name}")
     return LOADERS[name]
 
 
 def get_dumper(name: str):
+    name = name.lower()
     if name not in DUMPERS:
         raise ValueError(f"Unknown format: {name}")
     return DUMPERS[name]

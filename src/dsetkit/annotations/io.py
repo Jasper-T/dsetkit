@@ -5,6 +5,7 @@ from ..utils.file import ensure_dir
 # trigger adapter registration
 from . import formats  # noqa: F401
 from .registry import get_dumper, get_format_spec, get_loader
+from ._mapping import apply_conversion_mapping, validate_conversion_mapping
 from .schema import Annotation
 
 
@@ -110,6 +111,7 @@ def convert(
     target_format: str,
     source_format: str,
     out_dir: str | None = None,
+    names: list[str] | None = None,
     **kwargs,
 ) -> str:
     """
@@ -122,12 +124,24 @@ def convert(
     if a format is not supported, an error will be raised.
     """
 
+    source_format = get_format_spec(source_format).name
+    target_format = get_format_spec(target_format).name
+    if source_format == target_format:
+        raise ValueError("Source and target formats must differ")
+    final_names = names if names is not None else []
     ann = load(
         label_path=label_path,
         image_path=image_path,
         fmt=source_format,
         **kwargs,
     )
+
+    validate_conversion_mapping(
+        source_format, target_format, final_names,
+        class_ids=[item.category_id for item in ann.items],
+        categories=[item.category for item in ann.items],
+    )
+    apply_conversion_mapping(ann, source_format, target_format, final_names)
 
     out_path = auto_label_path(
         old_path = label_path, 

@@ -35,7 +35,13 @@ def write_labelme(label_dir: Path, stem: str, labels: list[str]) -> None:
 
 def write_png(image_dir: Path, name: str, content: bytes = VALID_PNG) -> None:
     image_dir.mkdir(parents=True, exist_ok=True)
-    (image_dir / name).write_bytes(content)
+    if content == VALID_PNG:
+        import cv2
+        import numpy as np
+
+        assert cv2.imwrite(str(image_dir / name), np.zeros((80, 100, 3), dtype=np.uint8))
+    else:
+        (image_dir / name).write_bytes(content)
 
 
 class TestDatasetProfile(unittest.TestCase):
@@ -55,22 +61,27 @@ class TestDatasetProfile(unittest.TestCase):
             write_labelme(label_dir, "orphan", ["cat"])
 
             dataset = Dataset(
-                names=["cat", "dog"],
+                task_type="detection", names=["cat", "dog"],
                 image_dir=image_dir,
                 label_dir=label_dir,
                 source_format="labelme",
+                check_images=True,
             )
             dataset.build()
 
             profile = dataset.profile()
 
             self.assertIsInstance(profile, DatasetProfile)
-            self.assertEqual(profile.images, 5)
+            self.assertEqual(profile.images, 3)
+            self.assertEqual(profile.total_images, 5)
+            self.assertEqual(len(profile.raw_samples), 5)
+            self.assertEqual(len(profile), 3)
             self.assertEqual(profile.positive_images, 1)
             self.assertEqual(profile.background_images, 2)
             self.assertEqual(profile.invalid_images, 2)
             self.assertEqual(profile.orphan_labels, 1)
-            self.assertEqual(profile.label_files, 4)
+            self.assertEqual(profile.label_files, 2)
+            self.assertEqual(profile.total_label_files, 4)
             self.assertEqual(profile.instances, 2)
             self.assertEqual(profile.class_instances, (1, 1))
             self.assertEqual(
@@ -83,7 +94,7 @@ class TestDatasetProfile(unittest.TestCase):
             image_dir = Path(tmp_dir) / "images"
             write_png(image_dir, "background.png")
 
-            dataset = Dataset(names=[], image_dir=image_dir)
+            dataset = Dataset(task_type="detection", names=[], image_dir=image_dir)
             dataset.build()
 
             profile = dataset.profile()
@@ -92,7 +103,7 @@ class TestDatasetProfile(unittest.TestCase):
             self.assertEqual(profile.label_files, 0)
 
     def test_profile_requires_built_dataset(self) -> None:
-        dataset = Dataset(names=[], image_dir=".")
+        dataset = Dataset(task_type="detection", names=[], image_dir=".")
 
         with self.assertRaises(RuntimeError):
             dataset.profile()

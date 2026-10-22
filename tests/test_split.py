@@ -1,103 +1,61 @@
 from pathlib import Path
-from tempfile import TemporaryDirectory
-import unittest
 
-from dsetkit import Dataset
-from dsetkit.split import split_paths, split_tvt
-from dsetkit.tools import split_dataset
-from dsetkit.utils.file import load_txt, save_txt
+import pytest
+
+from dsetkit import open_dataset, partition_paths, save_partition_txts
+from dsetkit.utils.file import load_txt
 
 
-def write_all_txt(dataset_root: Path, count: int = 10) -> str:
-    txt_name = "all.txt"
-    image_paths = [dataset_root / f"image_{index}.jpg" for index in range(count)]
-    save_txt(image_paths, dataset_root / txt_name)
-    return txt_name
-
-
-def write_image_dir(image_dir: Path, count: int = 10) -> list[Path]:
-    image_dir.mkdir(parents=True, exist_ok=True)
-    image_paths = [image_dir / f"image_{index}.jpg" for index in range(count)]
-    for path in image_paths:
-        path.touch()
-    return image_paths
-
-
-def split_counts(dataset_root: Path, split_names: list[str]) -> dict[str, int]:
-    return {
-        split_name: len(load_txt(dataset_root / f"{split_name}.txt"))
-        for split_name in split_names
+@pytest.mark.parametrize(
+    "rates,counts", [((0.6, 0.4, 0), (6, 4, 0)), ((0.5, 0.3, 0.2), (5, 3, 2)), ((0.6, 0, 0.4), (6, 0, 4))]
+)
+def test_partition_and_persistence_are_separate(tmp_path, rates, counts):
+    paths = [Path(f"image_{i}.jpg") for i in range(10)]
+    partitions = partition_paths(paths, rates, seed=22)
+    assert tuple(map(len, partitions.values())) == counts
+    assert not list(tmp_path.iterdir())
+    files = save_partition_txts(partitions, tmp_path / "out")
+    assert {name: load_txt(path) for name, path in files.items()} == {
+        name: [str(p) for p in values] for name, values in partitions.items()
     }
 
 
-class TestSplitPaths(unittest.TestCase):
-    def test_split_paths_with_train_ratio(self) -> None:
-        image_paths = [Path(f"image_{index}.jpg") for index in range(10)]
-        splits = split_paths(image_paths, rates=[0.6], seed=42)
+def test_open_partition_save_workflow_does_not_modify_source(tmp_path):
+    images = tmp_path / "input" / "images"
+    images.mkdir(parents=True)
+    for index in range(10):
+        import cv2
+        import numpy as np
 
-        self.assertEqual({name: len(paths) for name, paths in splits.items()}, {"train": 6, "val": 4})
-        self.assertNotIn("test", splits)
-
-    def test_split_paths_raises_on_empty_input(self) -> None:
-        with self.assertRaises(ValueError):
-            split_paths([], rates=[0.8, 0.2], seed=42)
-
-
-class TestSplitDataset(unittest.TestCase):
-    def test_split_dataset_writes_train_val(self) -> None:
-        with TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            image_dir = root / "images"
-            write_image_dir(image_dir)
-
-            dataset = Dataset(names=[], image_dir=image_dir)
-            dataset.build()
-            split_dataset(dataset, out_dir=root, rates=[0.6], seed=42)
-
-            self.assertEqual(
-                split_counts(root, ["train", "val"]),
-                {"train": 6, "val": 4},
-            )
+        assert cv2.imwrite(str(images / f"{index}.jpg"), np.zeros((10, 10, 3), dtype=np.uint8))
+    before = {p.name: p.read_bytes() for p in images.iterdir()}
+    dataset = open_dataset(task_type="detection", image_dir=images, names=[]).profile()
+    partitions = partition_paths(dataset.image_paths, (0.6, 0.4, 0), seed=22)
+    files = save_partition_txts(partitions, tmp_path / "out")
+    assert {name: len(load_txt(path)) for name, path in files.items()} == {"train": 6, "val": 4, "test": 0}
+    assert {name: load_txt(path) for name, path in files.items()} == {
+        name: [str(p) for p in values] for name, values in partitions.items()
+    }
+    assert before == {p.name: p.read_bytes() for p in images.iterdir()}
+    assert not list(images.parent.glob("*.txt"))
 
 
-class TestSplitTvt(unittest.TestCase):
-    def test_split_tvt_with_train_ratio_writes_train_val(self) -> None:
-        with TemporaryDirectory() as tmp_dir:
-            dataset_root = Path(tmp_dir)
-            txt_name = write_all_txt(dataset_root)
-
-            split_tvt(dataset_root, txt_name, rates=[0.6], seed=42)
-
-            self.assertEqual(
-                split_counts(dataset_root, ["train", "val"]),
-                {"train": 6, "val": 4},
-            )
-            self.assertFalse((dataset_root / "test.txt").exists())
-
-    def test_split_tvt_with_train_val_ratios_writes_remainder_to_test(self) -> None:
-        with TemporaryDirectory() as tmp_dir:
-            dataset_root = Path(tmp_dir)
-            txt_name = write_all_txt(dataset_root)
-
-            split_tvt(dataset_root, txt_name, rates=[0.5, 0.3], seed=42)
-
-            self.assertEqual(
-                split_counts(dataset_root, ["train", "val", "test"]),
-                {"train": 5, "val": 3, "test": 2},
-            )
-
-    def test_split_tvt_with_train_val_test_ratios_writes_three_splits(self) -> None:
-        with TemporaryDirectory() as tmp_dir:
-            dataset_root = Path(tmp_dir)
-            txt_name = write_all_txt(dataset_root)
-
-            split_tvt(dataset_root, txt_name, rates=[0.5, 0.3, 0.2], seed=42)
-
-            self.assertEqual(
-                split_counts(dataset_root, ["train", "val", "test"]),
-                {"train": 5, "val": 3, "test": 2},
-            )
+@pytest.mark.parametrize("rates", [(0.6,), (0.5, 0.3)])
+def test_implicit_short_ratios_are_not_supported(rates):
+    with pytest.raises(ValueError):
+        partition_paths([Path("a"), Path("b")], rates)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_legacy_entry_points_are_removed():
+    import importlib.util
+
+    import dsetkit
+    import dsetkit.discovery as discovery
+    import dsetkit.tools as tools
+
+    assert importlib.util.find_spec("dsetkit.split") is None
+    assert importlib.util.find_spec("dsetkit.layout") is None
+    assert not hasattr(dsetkit, "discover_dataset")
+    assert not hasattr(discovery, "discover_dataset")
+    assert not hasattr(tools, "split_dataset")
+    assert not hasattr(tools, "split_dirs")

@@ -1,159 +1,92 @@
-from pathlib import Path
-from typing import Mapping
+"""Pure evaluation of existing detections against explicitly supplied ground truth."""
 
-from .dataset import Dataset
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 from .detection import (
+    AnnotationTarget,
     EvaluationSample,
     PredictionResult,
     prediction_from_records,
+    target_from_records,
 )
 from .metrics import detection_metrics
 
 
 class Evaluator:
-    def __init__(self, dataset: Dataset):
-        """
-        Args:
-            dataset:
-                Dataset instance
-        """
-        self.dataset = dataset
-        self.names = dataset.names
+    """Pair predictions and GT by opaque sample IDs without file or model I/O.
 
-    def _load_predictions(self, image_path):
-        """
-        Load predictions from image path.
+    Both mappings use unique nonblank string IDs. Their detection boxes must use
+    the same xyxy coordinate system and class IDs. Names are optional for numeric
+    class IDs and required when records identify categories by string labels.
+    """
 
-        Override this when predictions live in files or another external source.
-        The returned value may be a PredictionResult or a list of dicts:
-            {
-                "bbox": [x1, y1, x2, y2],
-                "label": str,       # or class_id / cls
-                "conf": float,
-            }
-        """
-        raise NotImplementedError(
-            "Pass predictions to evaluate(...) or override _load_predictions(...)."
-        )
+    def __init__(self, names: list[str] | None = None):
+        if names is not None and not isinstance(names, list):
+            raise TypeError("Class names must be a list of unique nonblank strings")
+        if names is not None and (
+            any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError("Class names must be unique nonblank strings")
+        self.names = list(names) if names is not None else []
 
     def evaluate(
         self,
-        predictions=None,
+        predictions: Mapping[str, PredictionResult | Sequence[dict[str, Any]]],
+        ground_truths: Mapping[str, AnnotationTarget | Sequence[dict[str, Any]]],
         *,
         conf_threshold: float = 0.001,
-        iou: float | list[float] = 0.5,
-        print_metrics: bool = True,
-    ):
-        """
-        Evaluate existing predictions.
+        iou: float | Sequence[float] = 0.5,
+    ) -> dict:
+        """Return metrics for the sample population defined by ground_truths.
 
-        Args:
-            predictions:
-                Optional mapping from image filename/stem/path to predictions. If omitted,
-                _load_predictions(image_path) is called for each dataset sample.
-            conf_threshold:
-                Filters predictions before metric calculation.
-            iou:
-                Evaluation IoU threshold(s). A single float computes mAP@iou, e.g. iou=0.5 -> mAP50.
-                A sequence computes mean AP over those thresholds, e.g. np.linspace(0.5, 0.95, 10).
-            print_metrics:
-                Print a metrics table.
+        Missing predictions are empty; prediction IDs absent from GT are errors.
+        Background samples must be explicit empty GT entries. Each mapping value
+        is a typed detection object or a sequence of records: bbox (xyxy),
+        class_id/cls or label, and conf for predictions only.
+
+        metrics validates, sorts and deduplicates IoU thresholds. A single
+        threshold below 0.95 expands in 0.05 steps without exceeding 0.95.
         """
-        samples = self.detection_samples(predictions)
-        result = detection_metrics(
-            samples=samples,
+        return detection_metrics(
+            samples=self.detection_samples(predictions, ground_truths),
             names=self.names,
             conf_threshold=conf_threshold,
             iou=iou,
-        )
-        metrics = result.as_dict()
+        ).as_dict()
 
-        if print_metrics:
-            self.print_metrics(metrics)
+    def detection_samples(
+        self,
+        predictions: Mapping[str, PredictionResult | Sequence[dict[str, Any]]],
+        ground_truths: Mapping[str, AnnotationTarget | Sequence[dict[str, Any]]],
+    ) -> list[EvaluationSample]:
+        """Validate mappings and pair every GT sample with its prediction."""
+        for name, values in (("predictions", predictions), ("ground_truths", ground_truths)):
+            if not isinstance(values, Mapping):
+                raise TypeError(f"{name} must be a mapping")
+            if any(not isinstance(key, str) or not key.strip() for key in values):
+                raise ValueError(f"{name} sample IDs must be nonblank strings")
+        unknown = predictions.keys() - ground_truths.keys()
+        if unknown:
+            raise ValueError(f"Prediction sample IDs absent from ground_truths: {sorted(unknown)}")
 
-        return metrics
-
-    def detection_samples(self, predictions=None) -> list[EvaluationSample]:
         samples = []
-
-        for sample in self.dataset:
-            raw_prediction = self._prediction_for_sample(sample.image_path, predictions)
-            prediction = self._to_prediction(raw_prediction)
-            target = self.dataset.ground_truth(sample)
-            samples.append(
-                EvaluationSample(
-                    image_id=sample.image_path,
-                    prediction=prediction,
-                    target=target,
-                )
-            )
-
+        for sample_id, target in ground_truths.items():
+            if not isinstance(target, AnnotationTarget):
+                target = target_from_records(self._records(target, "ground truth"), self.names)
+            prediction = predictions.get(sample_id, ())
+            if not isinstance(prediction, PredictionResult):
+                prediction = prediction_from_records(self._records(prediction, "prediction"), self.names)
+            samples.append(EvaluationSample(sample_id, prediction, target))
         return samples
 
-    def _prediction_for_sample(self, image_path: Path, predictions):
-        if predictions is None:
-            return self._load_predictions(image_path)
-
-        if not isinstance(predictions, Mapping):
-            raise TypeError("predictions must be a mapping when provided")
-
-        keys = (
-            image_path,
-            str(image_path),
-            image_path.name,
-            image_path.stem,
-        )
-        for key in keys:
-            if key in predictions:
-                return predictions[key]
-
-        return []
-
-    def _to_prediction(self, value) -> PredictionResult:
-        if value is None:
-            return PredictionResult.empty()
-
-        if isinstance(value, PredictionResult):
-            return value
-
-        return prediction_from_records(list(value), self.names)
-
-    def print_metrics(self, metrics):
-        ap_keys = [
-            key
-            for key in metrics
-            if key.startswith("mAP") and key != "mAP"
-        ]
-
-        print()
-        print(
-            f"{'Class':<15}"
-            f"{'Images':>10}"
-            f"{'Instances':>12}"
-            f"{'P':>10}"
-            f"{'R':>10}"
-            + "".join(f"{key:>12}" for key in ap_keys)
-            + f"{'F1':>10}"
-        )
-        print("-" * (67 + 12 * len(ap_keys)))
-
-        print(
-            f"{'all':<15}"
-            f"{metrics['images']:>10}"
-            f"{metrics['instances']:>12}"
-            f"{metrics['precision']:>10.4f}"
-            f"{metrics['recall']:>10.4f}"
-            + "".join(f"{metrics[key]:>12.4f}" for key in ap_keys)
-            + f"{metrics['f1']:>10.4f}"
-        )
-
-        for class_name, m in metrics["per_class"].items():
-            print(
-                f"{class_name:<15}"
-                f"{m['images']:>10}"
-                f"{m['instances']:>12}"
-                f"{m['precision']:>10.4f}"
-                f"{m['recall']:>10.4f}"
-                + "".join(f"{m[key]:>12.4f}" for key in ap_keys)
-                + f"{m['f1']:>10.4f}"
-            )
+    @staticmethod
+    def _records(value, kind):
+        if (
+            not isinstance(value, Sequence)
+            or isinstance(value, (str, bytes, bytearray))
+            or any(not isinstance(record, Mapping) for record in value)
+        ):
+            raise TypeError(f"Each {kind} must be a typed detection object or a sequence of records")
+        return value

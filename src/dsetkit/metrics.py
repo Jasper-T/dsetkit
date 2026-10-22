@@ -1,4 +1,10 @@
-from dataclasses import dataclass
+"""Detection metrics checked against Ultralytics 8.4.183 (1da023f708be).
+
+Predictions match GT in descending confidence order. P/R/F1 use the
+confidence threshold maximizing mean F1; AP averages classes present in GT.
+"""
+
+from dataclasses import dataclass, field
 from typing import Sequence
 
 import numpy as np
@@ -46,6 +52,7 @@ class DetectionMetrics:
     ap_key: str
     ap_range_key: str
     per_class: dict[str, ClassMetrics]
+    per_class_by_id: dict[int, ClassMetrics] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -60,16 +67,21 @@ class DetectionMetrics:
                 name: metrics.as_dict(self.ap_key, self.ap_range_key)
                 for name, metrics in self.per_class.items()
             },
+            "per_class_by_id": {
+                class_id: metrics.as_dict(self.ap_key, self.ap_range_key)
+                for class_id, metrics in self.per_class_by_id.items()
+            },
         }
 
 
 def normalize_iou_thresholds(iou: float | Sequence[float] | np.ndarray) -> np.ndarray:
+    """Validate and return ascending unique IoUs before matching and AP calculation."""
     thresholds = np.asarray([iou] if np.isscalar(iou) else iou, dtype=np.float32)
     if thresholds.ndim != 1 or thresholds.size == 0:
         raise ValueError("iou must be a float or a non-empty 1D sequence")
-    if np.any((thresholds <= 0) | (thresholds > 1)):
+    if not np.isfinite(thresholds).all() or np.any((thresholds <= 0) | (thresholds > 1)):
         raise ValueError("iou thresholds must be in (0, 1]")
-    return thresholds
+    return np.unique(thresholds)
 
 
 def expand_iou_thresholds(iou: float | Sequence[float] | np.ndarray) -> np.ndarray:
@@ -89,7 +101,7 @@ def ap_keys_from_iou(iouv: np.ndarray) -> tuple[str, str]:
     ap_key = f"mAP{start:02d}"
 
     if len(iouv) == 1:
-        return ap_key, f"{ap_key}-95"
+        return ap_key, ap_key
 
     default = np.linspace(0.5, 0.95, 10, dtype=np.float32)
     if len(iouv) == len(default) and np.allclose(iouv, default):
@@ -146,6 +158,7 @@ def compute_ap(recall, precision) -> tuple[float, np.ndarray, np.ndarray]:
 
 
 def match_predictions(pred_cls, true_cls, iou, iouv) -> np.ndarray:
+    """Match in descending confidence order; callers must sort predictions first."""
     pred_cls = np.asarray(pred_cls)
     true_cls = np.asarray(true_cls)
     iou = np.asarray(iou)
@@ -157,16 +170,14 @@ def match_predictions(pred_cls, true_cls, iou, iouv) -> np.ndarray:
 
     iou = iou * (true_cls[:, None] == pred_cls[None, :])
     for idx, threshold in enumerate(iouv):
-        matches = np.array(np.nonzero(iou >= threshold)).T
-        if matches.shape[0] == 0:
-            continue
-
-        if matches.shape[0] > 1:
-            matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-            matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-            matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-
-        correct[matches[:, 1].astype(int), idx] = True
+        claimed = set()
+        for prediction in range(len(pred_cls)):
+            candidates = np.flatnonzero(iou[:, prediction] >= threshold)
+            available = [target for target in candidates if target not in claimed]
+            if available:
+                target = max(available, key=lambda target: iou[target, prediction])
+                claimed.add(target)
+                correct[prediction, idx] = True
 
     return correct
 
@@ -197,6 +208,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls, eps: float = 1e-16) -> tuple:
         n_labels = nt[ci]
         n_preds = class_mask.sum()
         if n_preds == 0 or n_labels == 0:
+            prec_values.append(np.zeros_like(x))
             continue
 
         fpc = (1 - tp[class_mask]).cumsum(0)
@@ -230,7 +242,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls, eps: float = 1e-16) -> tuple:
         r,
         f1,
         ap,
-        unique_classes.astype(int),
+        unique_classes,
         p_curve,
         r_curve,
         f1_curve,
@@ -254,7 +266,7 @@ def detection_metrics(
         "pred_cls": [],
         "target_cls": [],
     }
-    target_images = [set() for _ in names]
+    target_images = {}
 
     for image_idx, sample in enumerate(samples):
         preds = sample.prediction
@@ -268,11 +280,11 @@ def detection_metrics(
             pred_boxes = pred_boxes[keep]
             pred_cls = pred_cls[keep]
             pred_conf = pred_conf[keep]
+            order = np.argsort(-pred_conf, kind="stable")
+            pred_boxes, pred_cls, pred_conf = pred_boxes[order], pred_cls[order], pred_conf[order]
 
         for cls in np.unique(target.cls):
-            cls = int(cls)
-            if 0 <= cls < len(names):
-                target_images[cls].add(image_idx)
+            target_images.setdefault(cls, set()).add(image_idx)
 
         if len(pred_boxes) and len(target.boxes):
             tp = match_predictions(
@@ -286,8 +298,8 @@ def detection_metrics(
 
         stats["tp"].append(tp)
         stats["conf"].append(pred_conf.astype(np.float32, copy=False))
-        stats["pred_cls"].append(pred_cls.astype(np.int64, copy=False))
-        stats["target_cls"].append(target.cls.astype(np.int64, copy=False))
+        stats["pred_cls"].append(pred_cls)
+        stats["target_cls"].append(target.cls)
 
     flat_stats = {
         key: np.concatenate(value, 0) if value else np.zeros(0)
@@ -307,18 +319,14 @@ def detection_metrics(
         flat_stats["target_cls"].astype(int),
         minlength=len(names),
     )
-    nt_per_image = np.array([len(images) for images in target_images], dtype=int)
-
     per_class = {}
+    per_class_by_id = {}
     for result_idx, class_id in enumerate(ap_class_index):
-        if class_id < 0 or class_id >= len(names):
-            continue
-
         tp_count = int(tp[result_idx])
         fp_count = int(fp[result_idx])
-        instances = int(nt_per_class[class_id])
-        per_class[names[class_id]] = ClassMetrics(
-            images=int(nt_per_image[class_id]),
+        instances = int(nt_per_class[int(class_id)])
+        metrics = ClassMetrics(
+            images=len(target_images[class_id]),
             instances=instances,
             precision=float(p[result_idx]),
             recall=float(r[result_idx]),
@@ -329,6 +337,9 @@ def detection_metrics(
             fp=fp_count,
             fn=max(instances - tp_count, 0),
         )
+        per_class_by_id[int(class_id)] = metrics
+        if class_id < len(names):
+            per_class[names[int(class_id)]] = metrics
 
     return DetectionMetrics(
         images=len(samples),
@@ -341,5 +352,6 @@ def detection_metrics(
         ap_key=ap_key,
         ap_range_key=ap_range_key,
         per_class=per_class,
+        per_class_by_id=per_class_by_id,
     )
 

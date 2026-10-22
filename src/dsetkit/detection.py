@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -58,9 +57,15 @@ class PredictionResult:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationSample:
-    image_id: str | Path
+    """One paired sample; sample_id has no filesystem semantics."""
+
+    sample_id: str
     prediction: PredictionResult
     target: AnnotationTarget
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sample_id, str) or not self.sample_id.strip():
+            raise ValueError("Sample ID must be a nonblank string")
 
 
 def prediction_from_records(records: list[dict[str, Any]], names: list[str]) -> PredictionResult:
@@ -93,21 +98,18 @@ def target_from_records(records: list[dict[str, Any]], names: list[str]) -> Anno
     return AnnotationTarget(boxes=boxes, cls=classes)
 
 
-def class_id_from_record(record: dict[str, Any], *, names: list[str], kind: str) -> int:
+def class_id_from_record(record: dict[str, Any], *, names: list[str], kind: str):
     if "class_id" in record and record["class_id"] is not None:
-        class_id = int(record["class_id"])
+        class_id = record["class_id"]
     elif "cls" in record and record["cls"] is not None:
-        class_id = int(record["cls"])
+        class_id = record["cls"]
     else:
         label = record.get("label")
         if label not in names:
             raise ValueError(f"Unknown {kind} label: {label!r}")
         class_id = names.index(label)
 
-    if class_id < 0 or class_id >= len(names):
-        raise ValueError(f"Invalid {kind} class id: {class_id}")
-
-    return class_id
+    return _class_array([class_id])[0]
 
 
 def _boxes_array(value) -> np.ndarray:
@@ -118,9 +120,11 @@ def _boxes_array(value) -> np.ndarray:
 
 
 def _class_array(value) -> np.ndarray:
-    arr = np.asarray(value, dtype=np.int64)
-    if arr.size == 0:
-        return np.zeros(0, dtype=np.int64)
+    arr = np.asarray(value)
+    if arr.dtype.kind not in "iuf" or (
+        arr.size and (not np.isfinite(arr).all() or np.any(arr < 0) or np.any(arr != np.floor(arr)))
+    ):
+        raise ValueError("Class IDs must be finite nonnegative integers")
     return arr.reshape(-1)
 
 

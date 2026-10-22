@@ -1,11 +1,10 @@
-import importlib
+import json
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 
 import numpy as np
 
-from dsetkit import Dataset, PredictionResult, EvaluationSample, AnnotationTarget
+from dsetkit import PredictionResult, EvaluationSample, AnnotationTarget
 from dsetkit.evaluator import Evaluator
 from dsetkit.metrics import (
     ap_per_class,
@@ -15,27 +14,9 @@ from dsetkit.metrics import (
 )
 
 
-def write_image(path: Path, width: int = 10, height: int = 10) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    header = (
-        b"\x89PNG\r\n\x1a\n"
-        + (13).to_bytes(4, "big")
-        + b"IHDR"
-        + width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + bytes([8, 2, 0, 0, 0])
-    )
-    path.write_bytes(header)
-
-
-def write_yolo(path: Path, rows: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(rows), encoding="utf-8")
-
-
 def one_sample(conf: float = 0.9) -> EvaluationSample:
     return EvaluationSample(
-        image_id="image.jpg",
+        sample_id="sample",
         prediction=PredictionResult(
             boxes=[[0, 0, 10, 10]],
             cls=[0],
@@ -124,83 +105,30 @@ class TestDetectionMetrics(unittest.TestCase):
         self.assertAlmostEqual(metrics["mAP25"], 0.995, places=6)
         self.assertAlmostEqual(metrics["mAP25-95"], 0.995, places=6)
 
-    def test_evaluator_uses_passed_predictions_and_dataset_ground_truth(self) -> None:
-        with TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            image_path = root / "images" / "image.png"
-            label_path = root / "labels" / "image.txt"
-            write_image(image_path)
-            write_yolo(label_path, ["0 0.5 0.5 1.0 1.0"])
+    def test_evaluator_compares_explicit_predictions_and_ground_truth(self) -> None:
+        predictions = {"sample": [{"bbox": [0, 0, 10, 10], "class_id": 0, "conf": .9}]}
+        ground_truths = {"sample": [{"bbox": [0, 0, 10, 10], "class_id": 0}]}
+        metrics = Evaluator(names=["cat"]).evaluate(predictions, ground_truths)
+        self.assertEqual(metrics["images"], 1)
+        self.assertEqual(metrics["instances"], 1)
+        self.assertAlmostEqual(metrics["mAP50"], .995)
+        self.assertIn("cat", metrics["per_class"])
 
-            dataset = Dataset(
-                names=["cat"],
-                image_dir=image_path.parent,
-                label_dir=label_path.parent,
-                source_format="yolo",
-            )
-            dataset.build()
-            predictions = {
-                "image.png": [
-                    {
-                        "bbox": [0, 0, 10, 10],
-                        "class_id": 0,
-                        "conf": 0.9,
-                    }
-                ]
-            }
-
-            metrics = Evaluator(dataset).evaluate(
-                predictions=predictions,
-                iou=0.5,
-                print_metrics=False,
-            )
-
-            self.assertEqual(metrics["images"], 1)
-            self.assertEqual(metrics["instances"], 1)
-            self.assertIn("mAP50", metrics)
-            self.assertIn("cat", metrics["per_class"])
-
-    def test_match_predictions_is_ultralytics_compatible(self) -> None:
-        try:
-            ultralytics_metrics = importlib.import_module("ultralytics.utils.metrics")
-            validator_module = importlib.import_module("ultralytics.engine.validator")
-            torch = importlib.import_module("torch")
-        except ImportError as exc:
-            self.skipTest(f"optional dependency not installed: {exc}")
-
-        pred_cls = np.array([0, 0, 1])
-        true_cls = np.array([0, 1])
-        iou = np.array(
-            [
-                [0.9, 0.8, 0.0],
-                [0.0, 0.0, 0.7],
-            ],
-            dtype=np.float32,
-        )
-        iouv = np.linspace(0.5, 0.95, 10)
-
-        ours = match_predictions(pred_cls, true_cls, iou, iouv)
-
-        validator = validator_module.BaseValidator()
-        validator.iouv = torch.tensor(iouv)
-        expected = validator.match_predictions(
-            torch.tensor(pred_cls),
-            torch.tensor(true_cls),
-            torch.tensor(iou),
-        ).cpu().numpy()
-
-        np.testing.assert_array_equal(ours, expected)
-
-        tp = np.array([[True] * 10, [False] * 10, [True] * 5 + [False] * 5])
-        conf = np.array([0.9, 0.8, 0.7])
-        pred_cls = np.array([0, 0, 1])
-        target_cls = np.array([0, 1])
-
-        ours_ap = ap_per_class(tp, conf, pred_cls, target_cls)[:7]
-        expected_ap = ultralytics_metrics.ap_per_class(tp, conf, pred_cls, target_cls)[:7]
-
-        for actual, expected in zip(ours_ap, expected_ap):
-            np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    def test_matches_fixed_ultralytics_reference(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "ultralytics_metrics_8_4_183.json"
+        reference = json.loads(fixture.read_text())
+        self.assertEqual(reference["reference"]["version"], "8.4.183")
+        thresholds = np.asarray(reference["reference"]["iou_thresholds"], dtype=np.float32)
+        for case in reference["cases"]:
+            with self.subTest(case=case["name"]):
+                pred = np.asarray(case["pred_cls"])
+                true = np.asarray(case["true_cls"])
+                tp = match_predictions(pred, true, np.asarray(case["iou"]), thresholds)
+                expected_tp = np.asarray(case["tp"], dtype=bool).reshape(-1, len(thresholds))
+                np.testing.assert_array_equal(tp, expected_tp)
+                actual = ap_per_class(tp, case["conf"], pred, true)[:7]
+                for value, expected in zip(actual, case["ap_results"]):
+                    np.testing.assert_allclose(value, expected, rtol=1e-12, atol=1e-12)
 
 
 if __name__ == "__main__":

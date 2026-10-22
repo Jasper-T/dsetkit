@@ -4,6 +4,10 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 
+class AnnotationParseError(ValueError):
+    """Malformed annotation data, safe to record as a per-sample scan error."""
+
+
 @dataclass(frozen=True, slots=True)
 class ClassSchemaDifference:
     class_id: int

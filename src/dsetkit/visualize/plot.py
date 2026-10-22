@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 from typing import Sequence, Tuple, Union
 
@@ -5,6 +6,7 @@ import cv2
 import numpy as np
 
 from ..annotations.io import load
+from ..annotations._mapping import validate_class_ids, validate_names
 from ..annotations.schema import Annotation, AnnotationItem
 
 
@@ -179,7 +181,7 @@ class Plotter:
         if class_id is None:
             color = self.random_color(0)
         else:
-            color = self.random_color(class_id)
+            color = self.random_color(int(class_id))
 
         self.box(
             bbox,
@@ -230,10 +232,12 @@ class Plotter:
     ):
         save_path = Path(save_path).resolve()
 
-        cv2.imwrite(
-            save_path,
+        saved = cv2.imwrite(
+            str(save_path),
             self.image,
         )
+        if not saved:
+            raise OSError(f"Failed to save image: {save_path}")
 
     def get(self):
         return self.image
@@ -252,7 +256,11 @@ def plot(
     if image is None:
         if image_path is None:
             raise ValueError("image_path is required when image is not provided")
-        image = cv2.imread(image_path)
+        image = cv2.imread(
+            str(image_path), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+        )
+        if image is None:
+            raise ValueError(f"Cannot decode image: {image_path}")
     
     if anno_schema is None:
         if label_path is None:
@@ -262,9 +270,25 @@ def plot(
             label_path=label_path, 
             image_path=image_path, 
             fmt=fmt, 
-            names=names
+            width=image.shape[1],
+            height=image.shape[0],
         )
-        
+    final_names = names if names is not None else anno_schema.names
+    validate_names(final_names)
+    anno_schema = deepcopy(anno_schema)
+    native_categories = list(dict.fromkeys(item.category for item in anno_schema.items))
+    for item in anno_schema.items:
+        if item.category_id is None:
+            if final_names and item.category not in final_names:
+                raise ValueError(f"Visualization requires a name mapping for category: {item.category}")
+            item.category_id = (final_names or native_categories).index(item.category)
+    if final_names:
+        validate_class_ids(
+            [item.category_id for item in anno_schema.items], final_names, context="Visualization"
+        )
+    for item in anno_schema.items:
+        item.category = final_names[int(item.category_id)] if final_names else str(item.category_id)
+
     plotter = Plotter(image)
     for item in anno_schema.items:
         plotter.detection_from_schema(item)

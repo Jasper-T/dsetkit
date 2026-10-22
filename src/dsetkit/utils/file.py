@@ -1,4 +1,6 @@
+import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Iterable, Union
 
@@ -109,13 +111,18 @@ def flatten_dir(root_dir: str | Path) -> list[tuple[Path, Path]]:
 def merge_txt_files(
     txt_paths: Iterable[Union[str, Path]], output_txt_path: Union[str, Path]
 ) -> None:
-    """Merge multiple txt files into a new txt file in sequence."""
+    """Merge in sequence; the output must not refer to any input file."""
     output_path = Path(output_txt_path).resolve()
+    input_paths = [Path(path).resolve() for path in txt_paths]
+    for path in input_paths:
+        if path == output_path or (
+            output_path.exists() and path.exists() and output_path.samefile(path)
+        ):
+            raise ValueError(f"Merge output must differ from every input file: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8") as out_f:
-        for txt_path in txt_paths:
-            current_txt_path = Path(txt_path).resolve()
+        for current_txt_path in input_paths:
             if not current_txt_path.is_file():
                 continue
 
@@ -184,3 +191,35 @@ def build_stem_index(
             temp[path.stem] = (priority, path)
 
     return {k: v[1] for k, v in temp.items()}
+
+
+def validate_source_tree(directory: str | Path) -> Path:
+    """Reject links, special files and line breaks without following directory links.
+
+    This checks structure only. Dataset discovery still indexes direct files at
+    fixed layout positions; nested files are never promoted to dataset members.
+    """
+    root = Path(directory).expanduser().absolute()
+    if root.is_symlink():
+        raise ValueError(f"Symbolic links are not allowed in a dataset: {root}")
+    root.stat()
+    if not root.is_dir():
+        raise ValueError(f"Invalid directory: {root}")
+
+    def check(path: Path) -> None:
+        if "\n" in str(path) or "\r" in str(path):
+            raise ValueError(f"Line breaks are not allowed in dataset paths: {path!s}")
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            raise ValueError(f"Symbolic links are not allowed in a dataset: {path}")
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise ValueError(f"Unsupported special file in dataset: {path}")
+
+    def failed(error: OSError) -> None:
+        raise error
+
+    check(root)
+    for current, directories, files in os.walk(root, followlinks=False, onerror=failed):
+        for name in directories + files:
+            check(Path(current) / name)
+    return root.resolve()

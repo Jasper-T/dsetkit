@@ -1,41 +1,109 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import Sequence
 
+from loguru import logger
 from tqdm import tqdm
 
-from .annotations.io import (
-    convert as convert_annotation,
+from .annotations.io import auto_label_path, dump
+from .annotations._mapping import (
+    apply_conversion_mapping,
+    validate_class_ids,
+    validate_conversion_mapping,
+    validate_names,
 )
-from .annotations.io import (
-    get_label_dir_name,
-)
-from .augment.flip import FlipDirection, _validate_direction, flip_image, flip_label
-from .augment.rotate import RotateAngle, _validate_angle, rotate_image, rotate_label
+from .annotations.registry import get_format_spec
 from .dataset import Dataset
-from .split import save_split_txts, split_paths
+from .profile import DatasetProfile, DatasetSample
+from .collection_profile import DatasetCollectionProfile
 from .utils.file import ensure_dir, save_txt
+from .utils.image import read_image_info
+
+
+def _processing_samples(
+    profile: DatasetProfile | DatasetCollectionProfile, out_dir: str | Path | None
+):
+    """Resolve split-preserving output paths and detect collisions before writing."""
+    if isinstance(profile, DatasetCollectionProfile) and out_dir is None:
+        raise ValueError(
+            "An explicit output directory is required for a profile collection"
+        )
+    root = Path(out_dir) if out_dir is not None else None
+    entries, seen = [], set()
+    for sample in profile:
+        relative = profile.output_path(sample)
+        if relative in seen:
+            raise ValueError(
+                f"Colliding output image path: {relative}; specify collection splits"
+            )
+        seen.add(relative)
+        entries.append(
+            (
+                sample,
+                profile.source_profile(sample),
+                root / relative.parent if root else None,
+            )
+        )
+    return entries
 
 
 def convert_dataset(
-    dataset: Dataset,
+    profile: DatasetProfile | DatasetCollectionProfile,
     target_format: str,
     names: list[str] | None = None,
     out_dir: str | Path | None = None,
+    *,
+    progress: Callable[[int, int, DatasetSample], None] | None = None,
+    check_cancelled: Callable[[], None] | None = None,
 ) -> None:
-    names = names or dataset.names
-
-    for sample in tqdm(dataset, desc="Converting"):
-        if sample.label_path is None:
-            continue
-
-        convert_annotation(
-            label_path=sample.label_path,
-            image_path=sample.image_path,
-            target_format=target_format,
-            source_format=dataset.source_format,
-            names=names,
-            out_dir=out_dir,
+    if check_cancelled is not None:
+        check_cancelled()
+    profile = _require_profile(profile)
+    target_format = get_format_spec(target_format).name
+    supplied = names if names is not None else profile.names
+    if names is not None:
+        logger.info(
+            "Using explicit class names for this conversion: dataset.names={} -> input names={}",
+            profile.names,
+            names,
         )
+    parts = (
+        profile.sources if isinstance(profile, DatasetCollectionProfile) else [profile]
+    )
+    if any(part.source_format == target_format for part in parts):
+        raise ValueError("Source and target formats must differ")
+    for part in parts:
+        validate_conversion_mapping(
+            part.source_format,
+            target_format,
+            supplied,
+            class_ids=[
+                i for i, count in zip(part.class_ids, part.class_instances) if count
+            ],
+            categories=[
+                n for n, count in zip(part.class_names, part.class_instances) if count
+            ],
+        )
+    entries = _processing_samples(profile, out_dir)
+    for index, (sample, source, target_root) in enumerate(
+        tqdm(entries, desc="Converting", disable=progress is not None), start=1
+    ):
+        if check_cancelled is not None:
+            check_cancelled()
+        if sample.label_path is not None:
+            annotation = _processing_annotation(profile, sample)
+            apply_conversion_mapping(
+                annotation, source.source_format, target_format, supplied
+            )
+            path = auto_label_path(
+                str(sample.label_path),
+                target_format,
+                str(target_root) if target_root is not None else None,
+            )
+            dump(annotation, path, fmt=target_format)
+        if progress is not None:
+            progress(index, len(entries), sample)
+    if check_cancelled is not None:
+        check_cancelled()
 
 
 def convert_dirs(
@@ -43,44 +111,66 @@ def convert_dirs(
     label_dir: str | Path,
     source_format: str,
     target_format: str,
-    names: list[str],
+    names: list[str] | None = None,
     out_dir: str | Path | None = None,
+    *,
+    task_type: str,
 ) -> None:
     dataset = Dataset(
+        task_type=task_type,
         image_dir=image_dir,
         label_dir=label_dir,
         names=names,
         source_format=source_format,
     )
     dataset.build()
-    convert_dataset(dataset, target_format=target_format, names=names, out_dir=out_dir)
+    convert_dataset(
+        dataset.profile(), target_format=target_format, names=names, out_dir=out_dir
+    )
 
 
 def plot_dataset(
-    dataset: Dataset,
+    profile: DatasetProfile | DatasetCollectionProfile,
     names: list[str] | None = None,
     out_dir: str | Path | None = None,
 ) -> None:
     from .visualize.plot import plot
 
-    names = names or dataset.names
+    profile = _require_profile(profile)
+    names = names if names is not None else profile.names
+    validate_names(names)
+    if names:
+        validate_class_ids(
+            [
+                i
+                for i, count in zip(profile.class_ids, profile.class_instances)
+                if count
+            ],
+            names,
+            context="Visualization",
+        )
 
     if out_dir is None:
-        out_dir = Path(dataset.image_dir).parent / "annotations"
+        if isinstance(profile, DatasetCollectionProfile):
+            raise ValueError(
+                "An explicit output directory is required for a profile collection"
+            )
+        out_dir = Path(profile.image_dir).parent / "annotations"
 
     out_dir = Path(out_dir)
-    ensure_dir(out_dir)
-
-    for sample in tqdm(dataset, desc="Plotting"):
+    for sample, source, target_root in tqdm(
+        _processing_samples(profile, out_dir), desc="Plotting"
+    ):
         if sample.label_path is None:
             continue
 
+        ensure_dir(target_root)
+        annotation = _processing_annotation(profile, sample)
         plot(
-            label_path=sample.label_path,
-            image_path=sample.image_path,
+            anno_schema=annotation,
             names=names,
-            fmt=dataset.source_format,
-            save_path=out_dir / sample.image_path.name,
+            image_path=sample.image_path,
+            save_path=target_root / sample.image_path.name,
         )
 
 
@@ -88,184 +178,47 @@ def plot_dirs(
     image_dir: str | Path,
     label_dir: str | Path,
     source_format: str,
-    names: list[str],
+    names: list[str] | None = None,
     out_dir: str | Path | None = None,
+    *,
+    task_type: str,
 ) -> None:
     dataset = Dataset(
+        task_type=task_type,
         image_dir=image_dir,
         label_dir=label_dir,
         names=names,
         source_format=source_format,
     )
     dataset.build()
-    plot_dataset(dataset, names=names, out_dir=out_dir)
+    plot_dataset(dataset.profile(), names=names, out_dir=out_dir)
 
 
-def flip_dataset(
-    dataset: Dataset,
-    out_dir: str | Path,
-    direction: FlipDirection = 1,
-    names: list[str] | None = None,
-    target_format: str | None = None,
+def export_dataset(
+    profile: DatasetProfile | DatasetCollectionProfile, txt_path: str | Path
 ) -> None:
-    direction = _validate_direction(direction)
-    direction_name = "horizontal" if direction == 1 else "vertical"
-    source_format = dataset.source_format
-
-    out_img_dir = Path(out_dir) / "images"
-    out_label_dir = (
-        Path(out_dir) / get_label_dir_name(source_format)
-        if dataset.label_dir is not None
-        else None
-    )
-    ensure_dir(out_img_dir)
-    if out_label_dir is not None:
-        ensure_dir(out_label_dir)
-
-    for sample in tqdm(dataset, desc=f"Flipping ({direction_name})"):
-        flip_image(sample.image_path, out_img_dir, direction=direction)
-        if (
-            sample.label_path is not None
-            and sample.label_path.is_file()
-            and out_label_dir is not None
-        ):
-            flip_label(
-                sample.label_path,
-                sample.image_path,
-                out_label_dir,
-                source_format=source_format,
-                direction=direction,
-                names=names,
-                target_format=target_format,
-            )
+    profile = _require_profile(profile)
+    save_txt([sample.image_path for sample in profile], txt_path)
 
 
-def flip_dirs(
-    image_dir: str | Path,
-    label_dir: str | Path | None,
-    source_format: str,
-    out_dir: str | Path,
-    direction: FlipDirection = 1,
-    names: list[str] | None = None,
-    target_format: str | None = None,
-) -> None:
-    dataset = Dataset(
-        image_dir=image_dir,
-        label_dir=label_dir,
-        names=names or [],
-        source_format=source_format,
-    )
+def export_dirs(image_dir: str | Path, txt_path: str | Path, *, task_type: str) -> None:
+    dataset = Dataset(names=[], image_dir=image_dir, task_type=task_type)
     dataset.build()
-    flip_dataset(
-        dataset,
-        out_dir=out_dir,
-        direction=direction,
-        names=names,
-        target_format=target_format,
-    )
+    export_dataset(dataset.profile(), txt_path)
 
 
-def rotate_dataset(
-    dataset: Dataset,
-    out_dir: str | Path,
-    angle: RotateAngle = 90,
-    names: list[str] | None = None,
-    target_format: str | None = None,
-) -> None:
-    angle = _validate_angle(angle)
-    source_format = dataset.source_format
-
-    out_img_dir = Path(out_dir) / "images"
-    out_label_dir = (
-        Path(out_dir) / get_label_dir_name(source_format)
-        if dataset.label_dir is not None
-        else None
-    )
-    ensure_dir(out_img_dir)
-    if out_label_dir is not None:
-        ensure_dir(out_label_dir)
-
-    for sample in tqdm(dataset, desc=f"Rotating ({angle}° CW)"):
-        rotate_image(sample.image_path, out_img_dir, angle=angle)
-        if (
-            sample.label_path is not None
-            and sample.label_path.is_file()
-            and out_label_dir is not None
-        ):
-            rotate_label(
-                sample.label_path,
-                sample.image_path,
-                out_label_dir,
-                source_format=source_format,
-                angle=angle,
-                names=names,
-                target_format=target_format,
-            )
+def _require_profile(profile):
+    if not isinstance(profile, (DatasetProfile, DatasetCollectionProfile)):
+        raise TypeError(
+            "Expected DatasetProfile or DatasetCollectionProfile; call dataset.profile() after scanning"
+        )
+    return profile
 
 
-def rotate_dirs(
-    image_dir: str | Path,
-    label_dir: str | Path | None,
-    source_format: str,
-    out_dir: str | Path,
-    angle: RotateAngle = 90,
-    names: list[str] | None = None,
-    target_format: str | None = None,
-) -> None:
-    dataset = Dataset(
-        image_dir=image_dir,
-        label_dir=label_dir,
-        names=names or [],
-        source_format=source_format,
-    )
-    dataset.build()
-    rotate_dataset(
-        dataset,
-        out_dir=out_dir,
-        angle=angle,
-        names=names,
-        target_format=target_format,
-    )
-
-
-def export_dataset(dataset: Dataset, txt_path: str | Path) -> None:
-    save_txt([sample.image_path for sample in dataset], txt_path)
-
-
-def export_dirs(image_dir: str | Path, txt_path: str | Path) -> None:
-    dataset = Dataset(names=[], image_dir=image_dir)
-    dataset.build()
-    export_dataset(dataset, txt_path)
-
-
-def split_dataset(
-    dataset: Dataset,
-    out_dir: str | Path,
-    rates: Sequence[float] = (0.75, 0.15, 0.1),
-    seed: int = 42,
-    add_time: bool = False,
-) -> dict[str, Path]:
-    splits = split_paths(
-        [sample.image_path for sample in dataset],
-        rates=rates,
-        seed=seed,
-    )
-    return save_split_txts(splits, out_dir, add_time=add_time)
-
-
-def split_dirs(
-    image_dir: str | Path,
-    out_dir: str | Path,
-    rates: Sequence[float] = (0.75, 0.15, 0.1),
-    seed: int = 42,
-    add_time: bool = False,
-) -> dict[str, Path]:
-    dataset = Dataset(names=[], image_dir=image_dir)
-    dataset.build()
-    return split_dataset(
-        dataset,
-        out_dir=out_dir,
-        rates=rates,
-        seed=seed,
-        add_time=add_time,
-    )
+def _processing_annotation(profile, sample):
+    source = profile.source_profile(sample)
+    original = source._annotations.get(str(sample.image_path))
+    image_info = None
+    if original is not None and str(sample.image_path) not in source.image_sizes:
+        image_info = read_image_info(sample.image_path)
+    return profile.annotation(sample, image_info=image_info)

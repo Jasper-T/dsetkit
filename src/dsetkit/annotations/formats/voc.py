@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 from ...utils.image import resolve_image_wh
 from ..registry import register_format
-from ..schema import Annotation, AnnotationItem, BBox
+from ..schema import Annotation, AnnotationItem, AnnotationParseError, BBox
 
 
 def _parse_xml_int(parent, tag: str) -> int | None:
@@ -11,19 +11,20 @@ def _parse_xml_int(parent, tag: str) -> int | None:
     text = parent.findtext(tag)
     if not text or not text.strip():
         return None
-    return int(text)
+    try:
+        return int(text)
+    except ValueError as error:
+        raise AnnotationParseError(f"Invalid VOC dimension {tag}: {text!r}") from error
 
 
-def _get_float(b, tag: str, default=0.0) -> float:
-    if b is None:
-        return default
-    text = b.findtext(tag)
-    if not text:
-        return default
+def _get_float(parent, tag: str) -> float:
+    text = parent.findtext(tag)
+    if text is None or not text.strip():
+        raise AnnotationParseError(f"Missing VOC coordinate: {tag}")
     try:
         return float(text)
-    except ValueError:
-        return default
+    except ValueError as error:
+        raise AnnotationParseError(f"Invalid VOC coordinate {tag}: {text!r}") from error
 
 
 def load_voc(
@@ -37,6 +38,8 @@ def load_voc(
     names = names or []
     tree = ET.parse(path)
     root = tree.getroot()
+    if root.tag != "annotation":
+        raise AnnotationParseError("Expected a VOC annotation root")
 
     file_name = root.findtext("filename")
     extra = {
@@ -46,12 +49,12 @@ def load_voc(
     size = root.find("size")
     xml_width = _parse_xml_int(size, "width")
     xml_height = _parse_xml_int(size, "height")
-    width = width if width is not None else xml_width
-    height = height if height is not None else xml_height
-
     if image_path:
         extra["image_path"] = image_path
         width, height = resolve_image_wh(image_path, width, height)
+    else:
+        width = width if width is not None else xml_width
+        height = height if height is not None else xml_height
     
     ann = Annotation(
         width=width,
@@ -62,12 +65,12 @@ def load_voc(
 
     for obj in root.findall("object"):
         name = obj.findtext("name")
-        if name is None:
-            continue
+        if not name or not name.strip():
+            raise AnnotationParseError("Missing VOC object name")
 
         b = obj.find("bndbox")
         if b is None:
-            continue
+            raise AnnotationParseError("Missing VOC detection bounding box")
         
         category_id = names.index(name) if name in names else None
         item = AnnotationItem(
@@ -137,22 +140,22 @@ def dump_voc(
         ET.SubElement(
             bndbox,
             "xmin",
-        ).text = str(int(item.bbox.x1))
+        ).text = str(item.bbox.x1)
 
         ET.SubElement(
             bndbox,
             "ymin",
-        ).text = str(int(item.bbox.y1))
+        ).text = str(item.bbox.y1)
 
         ET.SubElement(
             bndbox,
             "xmax",
-        ).text = str(int(item.bbox.x2))
+        ).text = str(item.bbox.x2)
 
         ET.SubElement(
             bndbox,
             "ymax",
-        ).text = str(int(item.bbox.y2))
+        ).text = str(item.bbox.y2)
 
     ET.indent(root, space="  ")
 

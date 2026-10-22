@@ -83,14 +83,25 @@ def read_image_info(
     return reader(path)
 
 
-def validate_image(path: str | Path) -> ImageValidationResult:
-    """Validate basic image structure using headers and container metadata only."""
+def validate_image(path: str | Path, *, decode: bool = False) -> ImageValidationResult:
+    """Validate structure, optionally requiring a decodable image for processing."""
     path = Path(path)
     try:
         info = read_image_info(path)
         if info.width <= 0 or info.height <= 0:
             raise ValueError(f"Invalid image dimensions: {path}")
         _validate_image_container(path)
+        if decode:
+            import cv2
+
+            try:
+                image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+            except cv2.error as error:
+                raise ValueError(f"Cannot decode image: {path}") from error
+            if image is None or image.size == 0:
+                raise ValueError(f"Cannot decode image: {path}")
+            if image.shape[:2] != (info.height, info.width):
+                raise ValueError(f"Decoded dimensions differ from image header: {path}")
     except (OSError, ValueError, struct.error) as exc:
         return ImageValidationResult(
             valid=False,
@@ -147,8 +158,10 @@ def resolve_image_wh(image_path, width, height):
 def iter_image_paths(
     directory: str | Path,
 ) -> Iterator[Path]:
+    """Yield direct image files; Profile construction classifies duplicate stems."""
+    from .file import validate_source_tree
 
-    directory = Path(directory)
+    directory = validate_source_tree(directory)
 
     if not directory.is_dir():
         raise ValueError(

@@ -1,6 +1,8 @@
+import math
+
 from ...utils.image import resolve_image_wh
 from ..registry import register_format
-from ..schema import Annotation, AnnotationItem, BBox
+from ..schema import Annotation, AnnotationItem, AnnotationParseError, BBox
 
 
 def load_yolo(
@@ -9,6 +11,7 @@ def load_yolo(
     width: int | None = None,
     height: int | None = None,
     names: list[str] | None = None,
+    validate: bool = True,
 ):
     if image_path:
         width, height = resolve_image_wh(image_path, width, height)
@@ -23,14 +26,32 @@ def load_yolo(
     )
 
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, start=1):
             parts = line.strip().split()
 
-            if len(parts) != 5:
+            if not parts:
                 continue
+            if len(parts) != 5:
+                raise AnnotationParseError(f"Expected five detection fields at {path}:{line_number}")
 
-            cls, cx, cy, bw, bh = map(float, parts)
+            try:
+                cls, cx, cy, bw, bh = map(float, parts)
+            except ValueError as error:
+                raise AnnotationParseError(f"Invalid detection value at {path}:{line_number}") from error
 
+            if not all(math.isfinite(value) for value in (cls, cx, cy, bw, bh)):
+                raise AnnotationParseError(f"Non-finite detection value at {path}:{line_number}")
+            if not cls.is_integer() or cls < 0:
+                raise AnnotationParseError(f"Invalid detection class ID at {path}:{line_number}: {cls}")
+            if validate and (
+                bw <= 0
+                or bh <= 0
+                or cx - bw / 2 < -1e-9
+                or cy - bh / 2 < -1e-9
+                or cx + bw / 2 > 1 + 1e-9
+                or cy + bh / 2 > 1 + 1e-9
+            ):
+                raise AnnotationParseError(f"Invalid normalized detection box at {path}:{line_number}")
             cls_id = int(cls)
 
             if names and cls_id < len(names):
