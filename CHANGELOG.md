@@ -11,6 +11,15 @@ and this project adheres to Semantic Versioning.
 
 ---
 
+## [0.6.1] - 2026-10-22
+
+### Added
+
+- Add `Dataset.from_profile(profile)` to resume a scanner from an existing or JSON-restored single-source `DatasetProfile` without reading files, rescanning directories or reparsing labels. The scanner initially shares the supplied immutable result; subsequent checks replace only its own current Profile and preserve existing errors.
+- Document resumed annotation/image checks and explicit rebuilding. Collection Profiles and non-Profile inputs are rejected; collection restoration continues to use `DatasetCollection(restored_collection_profile)`.
+
+---
+
 ## [0.6.0] - 2026-10-22
 
 ### Changed
